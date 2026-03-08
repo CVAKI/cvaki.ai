@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary backgrounds -->
+    <color name="bg_keyboard">#0D0D1A</color>
+    <color name="bg_nav">#08080F</color>
+    <color name="bg_terminal">#000000</color>
+    <color name="bg_brain">#0A0A0F</color>
+
+    <!-- Nav colours -->
+    <color name="nav_active">#536DFE</color>
+    <color name="nav_inactive">#263238</color>
+
+    <!-- Key colours -->
+    <color name="key_normal">#263238</color>
+    <color name="key_delete">#B71C1C</color>
+    <color name="key_shift">#283593</color>
+    <color name="key_enter">#004D40</color>
+    <color name="key_space">#455A64</color>
+    <color name="key_special">#37474F</color>
+
+    <!-- Terminal -->
+    <color name="term_green">#00FF41</color>
+
+    <!-- Brain / CVA -->
+    <color name="cva_purple">#9C27B0</color>
+    <color name="cva_light">#CE93D8</color>
+    <color name="cva_dark">#4A148C</color>
+
+    <!-- Text -->
+    <color name="text_white">#FFFFFF</color>
+    <color name="text_hint">#666666</color>
+    <color name="text_secondary">#90A4AE</color>
+</resources>

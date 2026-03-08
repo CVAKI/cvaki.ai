@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CVA Keyboard</string>
+    <string name="keyboard_name">CVA Keyboard</string>
+    <string name="settings_title">CVA Settings</string>
+    <string name="api_key_hint">Enter Anthropic API key (sk-ant-…)</string>
+    <string name="btn_save">Save</string>
+    <string name="btn_enable_keyboard">Enable Keyboard</string>
+    <string name="btn_switch_keyboard">Switch to CVA</string>
+    <string name="brain_ready">🧠 CVA Brain ready. Type a message and tap Send.</string>
+    <string name="terminal_ready">CVA Terminal v1.0\n$ </string>
+    <string name="import_success">Imported to cursor ✓</string>
+    <string name="no_api_key">No API key. Open CVA Settings to configure.</string>
+</resources>

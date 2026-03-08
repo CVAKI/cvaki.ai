@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Reduced padding from 150dp to 24dp for larger logo -->
+    <item
+        android:drawable="@drawable/cvaki"
+        android:top="1dp"
+        android:bottom="1dp"
+        android:left="1dp"
+        android:right="1dp"/>
+</layer-list>

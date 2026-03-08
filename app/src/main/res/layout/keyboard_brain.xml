@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#0A0A0F">
+
+    <!-- ── Chat output area + side import buttons ────────────────────────── -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="175dp">
+
+        <!-- Left import button -->
+        <Button
+            android:id="@+id/btn_brain_import_left"
+            android:layout_width="36dp"
+            android:layout_height="match_parent"
+            android:layout_alignParentStart="true"
+            android:text="←"
+            android:textSize="16sp"
+            android:textColor="#CE93D8"
+            android:background="#100010"
+            android:padding="0dp"
+            android:contentDescription="Import left" />
+
+        <!-- Right import button -->
+        <Button
+            android:id="@+id/btn_brain_import_right"
+            android:layout_width="36dp"
+            android:layout_height="match_parent"
+            android:layout_alignParentEnd="true"
+            android:text="→"
+            android:textSize="16sp"
+            android:textColor="#CE93D8"
+            android:background="#100010"
+            android:padding="0dp"
+            android:contentDescription="Import right" />
+
+        <!-- Brain chat output -->
+        <ScrollView
+            android:id="@+id/sv_brain_output"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_toEndOf="@id/btn_brain_import_left"
+            android:layout_toStartOf="@id/btn_brain_import_right"
+            android:background="#0A0A0F"
+            android:scrollbars="vertical">
+
+            <TextView
+                android:id="@+id/tv_brain_output"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#E0E0E0"
+                android:textSize="12sp"
+                android:padding="6dp"
+                android:lineSpacingExtra="2dp"
+                android:text="🧠 CVA Brain ready.\nType a message below and tap Send.\n\n" />
+
+        </ScrollView>
+
+    </RelativeLayout>
+
+    <!-- ── Input indicator ───────────────────────────────────────────────── -->
+    <TextView
+        android:id="@+id/tv_brain_input"
+        android:layout_width="match_parent"
+        android:layout_height="26dp"
+        android:text="> █"
+        android:textColor="#CE93D8"
+        android:textSize="12sp"
+        android:fontFamily="monospace"
+        android:background="#0D0018"
+        android:paddingStart="8dp"
+        android:gravity="center_vertical" />
+
+    <!-- ── Action bar ────────────────────────────────────────────────────── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="30dp"
+        android:orientation="horizontal"
+        android:background="#0D0018">
+
+        <Button
+            android:id="@+id/btn_api_key"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="🔑 API Key"
+            android:textSize="10sp"
+            android:textColor="#CE93D8"
+            android:background="@android:color/transparent"
+            android:padding="0dp" />
+
+        <Button
+            android:id="@+id/btn_show_brain_keyboard"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="⌨ Type"
+            android:textSize="10sp"
+            android:textColor="#000000"
+            android:background="#9C27B0"
+            android:padding="0dp" />
+
+    </LinearLayout>
+
+    <!-- ── Slide-up brain keyboard (hidden by default) ───────────────────── -->
+    <LinearLayout
+        android:id="@+id/brain_slide_keyboard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#0D0018"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/brain_keyboard_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="2dp" />
+
+    </LinearLayout>
+
+</LinearLayout>

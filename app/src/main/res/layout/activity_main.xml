@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0D0D1A">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- Title -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🧠 CVA Keyboard"
+            android:textColor="#CE93D8"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:paddingBottom="4dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Cognitive Virtual Agent"
+            android:textColor="#536DFE"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:paddingBottom="16dp"/>
+
+        <!-- ── SECTION: IME Setup ──────────────────────────────────────── -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="KEYBOARD SETUP"
+            android:textColor="#536DFE"
+            android:textSize="11sp"
+            android:paddingBottom="4dp"/>
+
+        <Button
+            android:id="@+id/btn_enable_ime"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="1. Enable CVA Keyboard"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:background="#1A237E"
+            android:layout_marginBottom="6dp"/>
+
+        <Button
+            android:id="@+id/btn_switch_ime"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="2. Switch to CVA Keyboard"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:background="#283593"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- ── SECTION: AI Provider ───────────────────────────────────── -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="AI PROVIDER — SELECT ONE"
+            android:textColor="#536DFE"
+            android:textSize="11sp"
+            android:paddingBottom="6dp"/>
+
+        <!-- Radio buttons -->
+        <RadioGroup
+            android:id="@+id/radio_provider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="10dp">
+
+            <RadioButton
+                android:id="@+id/rb_anthropic"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Anthropic"
+                android:textColor="#CE93D8"
+                android:buttonTint="#CE93D8"
+                android:textSize="12sp"/>
+
+            <RadioButton
+                android:id="@+id/rb_gemini"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Gemini"
+                android:textColor="#CE93D8"
+                android:buttonTint="#CE93D8"
+                android:textSize="12sp"/>
+
+            <RadioButton
+                android:id="@+id/rb_openrouter"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="OpenRouter"
+                android:textColor="#CE93D8"
+                android:buttonTint="#CE93D8"
+                android:textSize="12sp"/>
+
+        </RadioGroup>
+
+        <!-- Anthropic key -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Anthropic API Key (claude.ai → API Keys)"
+            android:textColor="#90A4AE"
+            android:textSize="11sp"
+            android:paddingBottom="3dp"/>
+        <EditText
+            android:id="@+id/et_key_anthropic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="sk-ant-api03-..."
+            android:textColor="#FFFFFF"
+            android:textColorHint="#555555"
+            android:background="#1A1A2E"
+            android:padding="10dp"
+            android:inputType="textPassword"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:layout_marginBottom="10dp"/>
+
+        <!-- Gemini key -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Google Gemini API Key (aistudio.google.com → Get API Key)"
+            android:textColor="#90A4AE"
+            android:textSize="11sp"
+            android:paddingBottom="3dp"/>
+        <EditText
+            android:id="@+id/et_key_gemini"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="AIza..."
+            android:textColor="#FFFFFF"
+            android:textColorHint="#555555"
+            android:background="#1A1A2E"
+            android:padding="10dp"
+            android:inputType="textPassword"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:layout_marginBottom="10dp"/>
+
+        <!-- OpenRouter key -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="OpenRouter Key — FREE Llama 3.3 70B (openrouter.ai → Keys)"
+            android:textColor="#90A4AE"
+            android:textSize="11sp"
+            android:paddingBottom="3dp"/>
+        <EditText
+            android:id="@+id/et_key_openrouter"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="sk-or-v1-..."
+            android:textColor="#FFFFFF"
+            android:textColorHint="#555555"
+            android:background="#1A1A2E"
+            android:padding="10dp"
+            android:inputType="textPassword"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:layout_marginBottom="10dp"/>
+
+        <!-- Save all keys -->
+        <Button
+            android:id="@+id/btn_save_keys"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="💾  Save Keys &amp; Provider"
+            android:textSize="14sp"
+            android:textColor="#FFFFFF"
+            android:background="#6A1B9A"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- ── SECTION: Permissions ────────────────────────────────────── -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="PERMISSIONS"
+            android:textColor="#536DFE"
+            android:textSize="11sp"
+            android:paddingBottom="4dp"/>
+
+        <Button
+            android:id="@+id/btn_grant_permissions"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Grant All Permissions"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:background="#004D40"
+            android:layout_marginBottom="6dp"/>
+
+        <Button
+            android:id="@+id/btn_overlay_permission"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Grant Overlay Permission"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:background="#00695C"
+            android:layout_marginBottom="6dp"/>
+
+        <Button
+            android:id="@+id/btn_accessibility"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Enable Accessibility Service"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:background="#006064"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- ── SECTION: CVA Overlay ────────────────────────────────────── -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CVA OVERLAY"
+            android:textColor="#536DFE"
+            android:textSize="11sp"
+            android:paddingBottom="4dp"/>
+
+        <Button
+            android:id="@+id/btn_toggle_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Start CVA Floating Overlay"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:background="#4A148C"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- ── SECTION: Memory ─────────────────────────────────────────── -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CVAKI MEMORY FILES"
+            android:textColor="#536DFE"
+            android:textSize="11sp"
+            android:paddingBottom="4dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <Button
+                android:id="@+id/btn_view_memory"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="View Files"
+                android:textSize="12sp"
+                android:textColor="#FFFFFF"
+                android:background="#37474F"
+                android:layout_marginEnd="4dp"/>
+
+            <Button
+                android:id="@+id/btn_clear_memory"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="Clear Memory"
+                android:textSize="12sp"
+                android:textColor="#FFFFFF"
+                android:background="#B71C1C"/>
+
+        </LinearLayout>
+
+        <!-- Status -->
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Loading status..."
+            android:textColor="#90A4AE"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:background="#0A0A14"
+            android:padding="10dp"
+            android:layout_marginTop="4dp"/>
+
+    </LinearLayout>
+</ScrollView>
