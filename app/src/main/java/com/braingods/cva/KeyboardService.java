@@ -4,8 +4,11 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.inputmethodservice.InputMethodService;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.text.method.ScrollingMovementMethod;
 import android.view.KeyEvent;
 import android.view.View;
@@ -46,6 +49,12 @@ public class KeyboardService extends InputMethodService {
     private boolean isCapsLock = false;
     private long    lastShift  = 0;
 
+    // numbers / symbols mode  (false = letters, true = nums+symbols)
+    private boolean isNumSymMode      = false;   // normal & hash keyboards
+    private boolean isTermNumSymMode  = false;   // terminal keyboard
+    private boolean isSymPage2        = false;   // second symbols page (normal kb)
+    private boolean isTermSymPage2    = false;   // second symbols page (terminal kb)
+
     // ── Terminal ─────────────────────────────────────────────────────────────
     private TerminalManager terminalManager;
     private TextView  tvTermOut;
@@ -59,11 +68,14 @@ public class KeyboardService extends InputMethodService {
 
     // ── Brain / CVA ──────────────────────────────────────────────────────────
     private BrainAgent brainAgent;
-    private TextView  tvBrainOut;
+    private LinearLayout tvBrainOut;  // bubble container
+    private String lastCvaReply = "";
     private ScrollView svBrainOut;
     private View       brainSlideKb;
     private boolean    brainKbVisible = false;
     private StringBuilder brainBuf = new StringBuilder();
+    private boolean isBrainNumSymMode = false;
+    private boolean isBrainSymPage2   = false;
 
     // Background executor
     private final ExecutorService exec = Executors.newSingleThreadExecutor();
@@ -106,6 +118,10 @@ public class KeyboardService extends InputMethodService {
             default:                             activeKey = prefs.getString("key_anthropic",  prefs.getString("api_key", "")); break;
         }
         brainAgent = new BrainAgent(provider, activeKey, this);
+        brainAgent.setTerminalManager(terminalManager);
+        brainAgent.setAgentCallback((msg, isRunning, scrollToEnd) -> ui.post(() -> {
+            if (currentSection == SEC_BRAIN) showAgentStatus(msg);
+        }));
 
         showSection(SEC_NORMAL);
         return mainView;
@@ -137,12 +153,21 @@ public class KeyboardService extends InputMethodService {
     }
 
     private void highlightNav(int s) {
-        int active   = Color.parseColor("#536DFE");
-        int inactive = Color.parseColor("#263238");
-        btnNavNormal  .setBackgroundColor(s == SEC_NORMAL   ? active : inactive);
-        btnNavHash    .setBackgroundColor(s == SEC_HASH     ? active : inactive);
-        btnNavTerminal.setBackgroundColor(s == SEC_TERMINAL ? active : inactive);
-        btnNavBrain   .setBackgroundColor(s == SEC_BRAIN    ? active : inactive);
+        // Active tab: fox orange fill with dark text; inactive: dark surface with muted text
+        int activeBg   = Color.parseColor("#FF6A1A");
+        int inactiveBg = Color.parseColor("#1A1A1A");
+        int activeText   = Color.parseColor("#0A0A0A");
+        int inactiveText = Color.parseColor("#888888");
+
+        btnNavNormal  .setBackgroundColor(s == SEC_NORMAL   ? activeBg : inactiveBg);
+        btnNavHash    .setBackgroundColor(s == SEC_HASH     ? activeBg : inactiveBg);
+        btnNavTerminal.setBackgroundColor(s == SEC_TERMINAL ? activeBg : inactiveBg);
+        btnNavBrain   .setBackgroundColor(s == SEC_BRAIN    ? activeBg : inactiveBg);
+
+        btnNavNormal  .setTextColor(s == SEC_NORMAL   ? activeText : inactiveText);
+        btnNavHash    .setTextColor(s == SEC_HASH     ? activeText : inactiveText);
+        btnNavTerminal.setTextColor(s == SEC_TERMINAL ? activeText : inactiveText);
+        btnNavBrain   .setTextColor(s == SEC_BRAIN    ? activeText : inactiveText);
     }
 
     // =========================================================================
@@ -156,16 +181,36 @@ public class KeyboardService extends InputMethodService {
             {"?123"," ","↵"}
     };
 
+    // Numbers + symbols page 1
+    private static final String[][] NUM_SYM_1 = {
+            {"1","2","3","4","5","6","7","8","9","0"},
+            {"!","@","#","$","%","^","&","*","(",")",},
+            {"=\\<","-","_","+","=","[","]","{","}","DEL"},
+            {"ABC","SYM2"," ","↵"}
+    };
+
+    // Symbols page 2
+    private static final String[][] NUM_SYM_2 = {
+            {"~","`","\\","|","/","<",">","?",":",";"},
+            {"'","\"",",",".","…","•","€","£","¥","°"},
+            {"©","®","™","←","→","↑","↓","×","÷","DEL"},
+            {"ABC","SYM1"," ","↵"}
+    };
+
     private void buildKeyboardRows(View parent, boolean hash) {
         LinearLayout container = parent.findViewById(R.id.keyboard_rows_container);
         container.removeAllViews();
-        for (String[] row : QWERTY) {
+        String[][] layout = isNumSymMode
+                ? (isSymPage2 ? NUM_SYM_2 : NUM_SYM_1)
+                : QWERTY;
+        for (String[] row : layout) {
             LinearLayout rl = new LinearLayout(this);
             rl.setOrientation(LinearLayout.HORIZONTAL);
             rl.setLayoutParams(new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
-            rl.setPadding(dp(2), dp(2), dp(2), dp(2));
+            rl.setPadding(dp(3), dp(2), dp(3), dp(2));
+            rl.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
             for (String k : row) {
                 rl.addView(makeKey(k, hash, false));
             }
@@ -180,35 +225,34 @@ public class KeyboardService extends InputMethodService {
     private Button makeKey(String key, boolean hash, boolean terminal) {
         Button b = new Button(this);
         float weight = switch (key) {
-            case " " -> 4f;
-            case "SHF", "DEL", "↵" -> 1.5f;
+            case " "               -> 4f;
+            case "SHF","DEL","↵"  -> 1.5f;
+            case "?123","ABC","SYM1","SYM2","=\\<" -> 1.5f;
             default -> 1f;
         };
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(46), weight);
-        p.setMargins(1,1,1,1);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(54), weight);
+        p.setMargins(4,3,4,3);
         b.setLayoutParams(p);
         b.setPadding(0,0,0,0);
 
         // Keys always display normal letters — hash mode only changes the OUTPUT
         String display = switch (key) {
-            case "SHF" -> "⇧";
-            case "DEL" -> "⌫";
-            case "↵"  -> "↵";
-            default    -> isShiftOn ? key.toUpperCase() : key;
+            case "SHF"   -> "⇧";
+            case "DEL"   -> "⌫";
+            case "↵"    -> "↵";
+            case "?123"  -> "?123";
+            case "ABC"   -> "ABC";
+            case "SYM1"  -> "SYM";
+            case "SYM2"  -> "SYM2";
+            case "=\\<"  -> "=\\<";
+            case " "     -> "𝗖𝗩♞𝗞𝗜";
+            default      -> isShiftOn ? key.toUpperCase() : key;
         };
 
-        boolean isHashLetter = hash && key.length() == 1 && Character.isLetter(key.charAt(0));
-        if (isHashLetter) {
-            // Show  letter + tiny hash-glyph subtitle
-            String glyph = AdvancedEncryption.getHashChar(isShiftOn ? key.toUpperCase() : key.toLowerCase());
-            b.setText(display + "\n" + glyph);
-            b.setTextSize(8);
-        } else {
-            b.setText(display);
-            b.setTextSize(display.length() > 2 ? 9 : 13);
-        }
-        b.setTextColor(isHashLetter ? Color.parseColor("#90CAF9") : Color.WHITE);
-        b.setBackgroundColor(keyColor(key));
+        b.setText(display);
+        b.setTextSize(display.length() > 2 ? 18 : 26);
+        b.setTextColor(key.equals(" ") ? Color.parseColor("#FF6A1A") : Color.WHITE);
+        b.setBackground(roundedKey(keyColor(key)));
 
         b.setOnClickListener(v -> {
             if (terminal) handleTermKey(key);
@@ -222,13 +266,30 @@ public class KeyboardService extends InputMethodService {
 
     private int keyColor(String k) {
         return switch (k) {
-            case "DEL"  -> Color.parseColor("#B71C1C");
-            case "SHF"  -> Color.parseColor("#283593");
-            case "↵"    -> Color.parseColor("#004D40");
-            case "?123" -> Color.parseColor("#37474F");
-            case " "    -> Color.parseColor("#455A64");
-            default     -> Color.parseColor("#263238");
+            // Action keys — fox orange theme
+            case "↵"   -> Color.parseColor("#FF6A1A");   // Enter: full orange CTA
+            case "DEL" -> Color.parseColor("#CC3300");   // Delete: burnt orange-red
+            case "SHF" -> Color.parseColor("#2A2A2A");   // Shift: dark elevated
+            case "?123","ABC","SYM1","SYM2","=\\<" -> Color.parseColor("#222222");
+            case " "   -> Color.parseColor("#1C1C1C");   // Space: subtly lighter
+            default -> {
+                if (k.length() == 1 && Character.isDigit(k.charAt(0)))
+                    yield Color.parseColor("#2C1800");    // Digits: warm dark tint
+                yield Color.parseColor("#161616");        // Letters: pure dark
+            }
         };
+    }
+
+    // =========================================================================
+    // Rounded key background helper
+    // =========================================================================
+
+    private android.graphics.drawable.GradientDrawable roundedKey(int color) {
+        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+        gd.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        gd.setCornerRadius(dp(10));
+        gd.setColor(color);
+        return gd;
     }
 
     // =========================================================================
@@ -236,6 +297,7 @@ public class KeyboardService extends InputMethodService {
     // =========================================================================
 
     private void handleKey(String key, boolean hash) {
+        vibrate();
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
         switch (key) {
@@ -252,12 +314,31 @@ public class KeyboardService extends InputMethodService {
                 ic.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
                 ic.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP,   KeyEvent.KEYCODE_ENTER));
             }
-            case " " -> ic.commitText(hash ? AdvancedEncryption.getHashChar(" ") : " ", 1);
-            case "?123" -> Toast.makeText(this, "Symbols panel – coming soon", Toast.LENGTH_SHORT).show();
+            case " " -> ic.commitText(hash && !isNumSymMode ? AdvancedEncryption.getHashChar(" ") : " ", 1);
+            case "?123" -> {
+                isNumSymMode = true; isSymPage2 = false;
+                buildKeyboardRows(currentSection == SEC_NORMAL ? sectionNormal : sectionHash,
+                        currentSection == SEC_HASH);
+            }
+            case "ABC" -> {
+                isNumSymMode = false; isSymPage2 = false;
+                buildKeyboardRows(currentSection == SEC_NORMAL ? sectionNormal : sectionHash,
+                        currentSection == SEC_HASH);
+            }
+            case "SYM2", "=\\<" -> {
+                isNumSymMode = true; isSymPage2 = true;
+                buildKeyboardRows(currentSection == SEC_NORMAL ? sectionNormal : sectionHash,
+                        currentSection == SEC_HASH);
+            }
+            case "SYM1" -> {
+                isNumSymMode = true; isSymPage2 = false;
+                buildKeyboardRows(currentSection == SEC_NORMAL ? sectionNormal : sectionHash,
+                        currentSection == SEC_HASH);
+            }
             default -> {
-                String ch = isShiftOn ? key.toUpperCase() : key.toLowerCase();
-                ic.commitText(hash ? AdvancedEncryption.getHashChar(ch) : ch, 1);
-                if (isShiftOn && !isCapsLock) {
+                String ch = (isShiftOn && !isNumSymMode) ? key.toUpperCase() : key;
+                ic.commitText(hash && !isNumSymMode ? AdvancedEncryption.getHashChar(ch) : ch, 1);
+                if (isShiftOn && !isCapsLock && !isNumSymMode) {
                     isShiftOn = false;
                     buildKeyboardRows(currentSection == SEC_NORMAL ? sectionNormal : sectionHash,
                             currentSection == SEC_HASH);
@@ -357,7 +438,7 @@ public class KeyboardService extends InputMethodService {
         tvTermInputLine= sectionTerminal.findViewById(R.id.tv_term_input_line);
         termSlideKb    = sectionTerminal.findViewById(R.id.terminal_slide_keyboard);
 
-        tvTermOut.setTextColor(Color.parseColor("#00FF41"));
+        tvTermOut.setTextColor(Color.parseColor("#FF8C42"));  // orange terminal output
         tvTermOut.setBackgroundColor(Color.BLACK);
         tvTermOut.setTypeface(android.graphics.Typeface.MONOSPACE);
 
@@ -376,14 +457,38 @@ public class KeyboardService extends InputMethodService {
             });
         }
 
-        // Auto-import toggle — when ON, every new output line is sent to the cursor
-        Button importLeft  = sectionTerminal.findViewById(R.id.btn_import_left);
-        Button importRight = sectionTerminal.findViewById(R.id.btn_import_right);
-        if (importLeft != null) {
-            importLeft.setOnClickListener(v -> toggleAutoImport(importLeft));
-        }
-        if (importRight != null) {
-            importRight.setOnClickListener(v -> toggleAutoImport(importRight));
+        // LIVE toggle switch — single Switch widget on the top-bar right side
+        android.widget.Switch liveSwitch = sectionTerminal.findViewById(R.id.switch_live_import);
+        if (liveSwitch != null) {
+            liveSwitch.setChecked(false);
+            liveSwitch.setOnCheckedChangeListener((sw, isChecked) -> {
+                autoImportOn = isChecked;
+                // Cast to Switch to access thumb/track tint APIs
+                android.widget.Switch s = (android.widget.Switch) sw;
+                int thumbOn  = android.graphics.Color.parseColor("#00FF41");
+                int thumbOff = android.graphics.Color.parseColor("#444444");
+                int trackOn  = android.graphics.Color.parseColor("#004D14");
+                int trackOff = android.graphics.Color.parseColor("#1A1A1A");
+                s.setThumbTintList(android.content.res.ColorStateList.valueOf(isChecked ? thumbOn : thumbOff));
+                s.setTrackTintList(android.content.res.ColorStateList.valueOf(isChecked ? trackOn : trackOff));
+                // Update label next to switch — find the LIVE TextView in the same parent
+                android.view.ViewGroup bar = (android.view.ViewGroup) sw.getParent();
+                if (bar != null) {
+                    for (int i = 0; i < bar.getChildCount(); i++) {
+                        android.view.View child = bar.getChildAt(i);
+                        if (child instanceof TextView) {
+                            ((TextView) child).setTextColor(isChecked
+                                    ? android.graphics.Color.parseColor("#00FF41")
+                                    : android.graphics.Color.parseColor("#555555"));
+                        }
+                    }
+                }
+                if (tvTermInputLine != null) {
+                    tvTermInputLine.setText(isChecked
+                            ? "[ LIVE: output → cursor ON ]"
+                            : "$ " + termBuf + "█");
+                }
+            });
         }
 
         // Show Termux status in label
@@ -408,13 +513,13 @@ public class KeyboardService extends InputMethodService {
         if (btnRestart != null) {
             btnRestart.setOnClickListener(v -> {
                 tvTermOut.setText("[Restarting shell...] ");
-                        termBuf.setLength(0);
+                termBuf.setLength(0);
                 updateTermInputLine();
                 terminalManager.restart();
             });
             btnRestart.setOnLongClickListener(v -> {
                 tvTermOut.setText("[Re-downloading BusyBox...] ");
-                        termBuf.setLength(0);
+                termBuf.setLength(0);
                 updateTermInputLine();
                 terminalManager.reinstall(null);
                 return true;
@@ -430,38 +535,71 @@ public class KeyboardService extends InputMethodService {
             {"q","w","e","r","t","y","u","i","o","p"},
             {"a","s","d","f","g","h","j","k","l"},
             {"SHF","z","x","c","v","b","n","m","DEL"},
-            {" ","↵"}
+            {"?123"," ","↵"}
+    };
+
+    // Terminal num/sym page 1
+    private static final String[][] TERM_NUM_SYM_1 = {
+            {"CTRL","ALT","TAB","ESC","↑","↓","←","→"},
+            {"1","2","3","4","5","6","7","8","9","0"},
+            {"!","@","#","$","%","^","&","*","(",")",},
+            {"=\\<","-","_","+","=","[","]","{","}","DEL"},
+            {"ABC","SYM2"," ","↵"}
+    };
+
+    // Terminal num/sym page 2
+    private static final String[][] TERM_NUM_SYM_2 = {
+            {"CTRL","ALT","TAB","ESC","↑","↓","←","→"},
+            {"~","`","\\","|","/","<",">","?",":",";"},
+            {"'","\"",",",".","~","-","_","=","+","DEL"},
+            {"ABC","SYM1"," ","↵"}
     };
 
     private void buildTerminalKeyboard() {
         LinearLayout container = sectionTerminal.findViewById(R.id.terminal_keyboard_container);
         container.removeAllViews();
 
-        for (String[] row : TERM_ROWS) {
+        String[][] layout = isTermNumSymMode
+                ? (isTermSymPage2 ? TERM_NUM_SYM_2 : TERM_NUM_SYM_1)
+                : TERM_ROWS;
+
+        for (String[] row : layout) {
             LinearLayout rl = new LinearLayout(this);
             rl.setOrientation(LinearLayout.HORIZONTAL);
             rl.setLayoutParams(new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-            rl.setPadding(dp(2), dp(1), dp(2), dp(1));
+            rl.setPadding(dp(3), dp(2), dp(3), dp(2));
+            rl.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
             for (String k : row) {
                 Button b = new Button(this);
                 float w = switch (k) {
                     case " " -> 4f;
-                    case "↵","DEL","SHF" -> 1.5f;
+                    case "↵","DEL","SHF","?123","ABC","SYM1","SYM2","=\\<" -> 1.5f;
                     default -> 1f;
                 };
-                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(40), w);
-                p.setMargins(1,1,1,1);
+                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(48), w);
+                p.setMargins(4,3,4,3);
                 b.setLayoutParams(p);
                 b.setPadding(0,0,0,0);
-                b.setText(k.equals("SHF") ? "⇧" : k.equals("DEL") ? "⌫" : k);
-                b.setTextSize(k.length() > 2 ? 10 : 12);
-                b.setTextColor(Color.WHITE);
-                b.setBackgroundColor(switch (k) {
-                    case "CTRL","ALT","ESC","TAB" -> Color.parseColor("#1A237E");
-                    case "↑","↓","←","→"          -> Color.parseColor("#006064");
-                    default -> keyColor(k);
-                });
+                String disp = switch (k) {
+                    case "SHF"  -> "⇧";
+                    case "DEL"  -> "⌫";
+                    case " "    -> "𝗖𝗩♞𝗞𝗜";
+                    default     -> k;
+                };
+                b.setText(disp);
+                b.setTextSize(disp.length() > 2 ? 18 : 24);
+                b.setTextColor(k.equals(" ") ? Color.parseColor("#FF6A1A") : Color.WHITE);
+                b.setBackground(roundedKey(switch (k) {
+                    case "CTRL","ALT","ESC","TAB"    -> Color.parseColor("#2C1800");
+                    case "↑","↓","←","→"             -> Color.parseColor("#CC3300");
+                    case "?123","ABC","SYM1","SYM2","=\\<" -> Color.parseColor("#222222");
+                    default -> {
+                        if (k.length() == 1 && Character.isDigit(k.charAt(0)))
+                            yield Color.parseColor("#2C1800");
+                        yield keyColor(k);
+                    }
+                }));
                 final String fk = k;
                 b.setOnClickListener(v -> handleTermKey(fk));
                 rl.addView(b);
@@ -471,6 +609,7 @@ public class KeyboardService extends InputMethodService {
     }
 
     private void handleTermKey(String key) {
+        vibrate();
         switch (key) {
             case "DEL" -> {
                 if (termBuf.length() > 0) {
@@ -497,26 +636,31 @@ public class KeyboardService extends InputMethodService {
                     updateTermInputLine();
                 }
             }
-            case "SHF" -> { isShiftOn = !isShiftOn; }
-            case " "   -> { termBuf.append(" "); updateTermInputLine(); }
-            case "CTRL"-> terminalManager.setCtrl(true);
-            case "ALT" -> terminalManager.setAlt(true);
-            case "ESC" -> terminalManager.sendInput("\u001b");
-            case "TAB" -> { termBuf.append("\t"); terminalManager.sendInput("\t"); }
-            case "↑"  -> terminalManager.sendInput("\u001b[A");
-            case "↓"  -> terminalManager.sendInput("\u001b[B");
-            case "←"  -> terminalManager.sendInput("\u001b[D");
-            case "→"  -> terminalManager.sendInput("\u001b[C");
+            case "SHF"  -> { isShiftOn = !isShiftOn; }
+            case " "    -> { termBuf.append(" "); terminalManager.sendInput(" "); updateTermInputLine(); }
+            case "CTRL" -> terminalManager.setCtrl(true);
+            case "ALT"  -> terminalManager.setAlt(true);
+            case "ESC"  -> terminalManager.sendInput("\u001b");
+            case "TAB"  -> { termBuf.append("\t"); terminalManager.sendInput("\t"); }
+            case "↑"   -> terminalManager.sendInput("\u001b[A");
+            case "↓"   -> terminalManager.sendInput("\u001b[B");
+            case "←"   -> terminalManager.sendInput("\u001b[D");
+            case "→"   -> terminalManager.sendInput("\u001b[C");
+            case "?123" -> { isTermNumSymMode = true;  isTermSymPage2 = false; buildTerminalKeyboard(); }
+            case "ABC"  -> { isTermNumSymMode = false; isTermSymPage2 = false; buildTerminalKeyboard(); }
+            case "SYM2","=\\<" -> { isTermNumSymMode = true; isTermSymPage2 = true;  buildTerminalKeyboard(); }
+            case "SYM1" -> { isTermNumSymMode = true; isTermSymPage2 = false; buildTerminalKeyboard(); }
             default -> {
-                String c = isShiftOn ? key.toUpperCase() : key.toLowerCase();
-                if (terminalManager.isCtrl()) {
-                    int code = c.charAt(0) - 'a' + 1;
+                String c = (isShiftOn && !isTermNumSymMode) ? key.toUpperCase() : key;
+                if (terminalManager.isCtrl() && c.length() == 1 && Character.isLetter(c.charAt(0))) {
+                    int code = Character.toLowerCase(c.charAt(0)) - 'a' + 1;
                     terminalManager.sendInput(String.valueOf((char) code));
                     terminalManager.setCtrl(false);
                 } else {
                     termBuf.append(c);
+                    terminalManager.sendInput(c);
                     updateTermInputLine();
-                    if (isShiftOn) isShiftOn = false;
+                    if (isShiftOn && !isTermNumSymMode) isShiftOn = false;
                 }
             }
         }
@@ -529,28 +673,6 @@ public class KeyboardService extends InputMethodService {
         InputConnection ic = getCurrentInputConnection();
         if (ic != null) ic.deleteSurroundingText(9999, 0);
         terminalManager.clearScreen();
-    }
-
-    /** Toggle continuous auto-import mode on/off */
-    private void toggleAutoImport(android.widget.Button btn) {
-        autoImportOn = !autoImportOn;
-        // Update both buttons — no Toast (IME toasts are suppressed by Android)
-        int[] ids = {R.id.btn_import_left, R.id.btn_import_right};
-        for (int id : ids) {
-            Button b = sectionTerminal.findViewById(id);
-            if (b != null) {
-                b.setText(autoImportOn ? "⏹ LIVE" : "←In");
-                b.setBackgroundColor(autoImportOn
-                        ? Color.parseColor("#00C853")
-                        : Color.parseColor("#0A1A0A"));
-            }
-        }
-        // Show status in the input line instead of Toast
-        if (tvTermInputLine != null) {
-            tvTermInputLine.setText(autoImportOn
-                    ? "[ LIVE: output → cursor ON ]"
-                    : "[ LIVE OFF ] $ " + termBuf + "█");
-        }
     }
 
     /** Push the last meaningful output line to the active cursor (if auto-import is on) */
@@ -593,12 +715,13 @@ public class KeyboardService extends InputMethodService {
         svBrainOut   = sectionBrain.findViewById(R.id.sv_brain_output);
         brainSlideKb = sectionBrain.findViewById(R.id.brain_slide_keyboard);
 
-        tvBrainOut.setTextColor(Color.parseColor("#E0E0E0"));
+        // Keyboard always visible — no slide/toggle needed
+        if (brainSlideKb != null) brainSlideKb.setVisibility(View.VISIBLE);
 
         buildBrainKeyboard();
 
         Button btnToggle = sectionBrain.findViewById(R.id.btn_show_brain_keyboard);
-        if (btnToggle != null) btnToggle.setOnClickListener(v -> toggleBrainKb());
+        if (btnToggle != null) btnToggle.setVisibility(View.GONE);
 
         View il = sectionBrain.findViewById(R.id.btn_brain_import_left);
         View ir = sectionBrain.findViewById(R.id.btn_brain_import_right);
@@ -606,44 +729,94 @@ public class KeyboardService extends InputMethodService {
         if (ir != null) ir.setOnClickListener(v -> importBrainToCursor());
 
         Button btnKey = sectionBrain.findViewById(R.id.btn_api_key);
-        if (btnKey != null) btnKey.setOnClickListener(v ->
-                Toast.makeText(this, "Open CVA Settings app to set API key", Toast.LENGTH_LONG).show());
+        if (btnKey != null) btnKey.setOnClickListener(v -> {
+            animPress(v);
+            // Clear history and reload API key from prefs
+            brainAgent.clearHistory();
+            SharedPreferences prefs = getSharedPreferences("cva_prefs", Context.MODE_PRIVATE);
+            String prov = prefs.getString("provider", BrainAgent.PROVIDER_ANTHROPIC);
+            String key;
+            switch (prov) {
+                case BrainAgent.PROVIDER_GEMINI:     key = prefs.getString("key_gemini", ""); break;
+                case BrainAgent.PROVIDER_OPENROUTER: key = prefs.getString("key_openrouter", ""); break;
+                default:                             key = prefs.getString("key_anthropic", prefs.getString("api_key", "")); break;
+            }
+            brainAgent.setProvider(prov);
+            brainAgent.setApiKey(key);
+            if (tvBrainOut != null) tvBrainOut.removeAllViews();
+            addBubble("🔄 Session refreshed. Provider: " + prov, false);
+        });
 
-        tvBrainOut.setText("🧠 CVA Brain ready.\nType a message below and tap Send.\n\n");
+        // Add welcome bubble
+        addBubble("🦊 CVA Brain ready. I can run device commands automatically — just ask!", false);
     }
 
     private static final String[][] BRAIN_ROWS = {
             {"q","w","e","r","t","y","u","i","o","p"},
             {"a","s","d","f","g","h","j","k","l"},
             {"SHF","z","x","c","v","b","n","m","DEL"},
-            {" ","SEND"}
+            {"?123"," ","SEND"}
+    };
+
+    private static final String[][] BRAIN_NUM_SYM_1 = {
+            {"1","2","3","4","5","6","7","8","9","0"},
+            {"!","@","#","$","%","^","&","*","(",")",},
+            {"=\\<","-","_","+","=","[","]","{","}","DEL"},
+            {"ABC","SYM2"," ","SEND"}
+    };
+
+    private static final String[][] BRAIN_NUM_SYM_2 = {
+            {"~","`","\\","|","/","<",">","?",":",";"},
+            {"'","\"",",",".","…","•","€","£","¥","°"},
+            {"©","®","™","←","→","↑","↓","×","÷","DEL"},
+            {"ABC","SYM1"," ","SEND"}
     };
 
     private void buildBrainKeyboard() {
         LinearLayout container = sectionBrain.findViewById(R.id.brain_keyboard_container);
         container.removeAllViews();
-        for (String[] row : BRAIN_ROWS) {
+        String[][] layout = isBrainNumSymMode
+                ? (isBrainSymPage2 ? BRAIN_NUM_SYM_2 : BRAIN_NUM_SYM_1)
+                : BRAIN_ROWS;
+        for (String[] row : layout) {
             LinearLayout rl = new LinearLayout(this);
             rl.setOrientation(LinearLayout.HORIZONTAL);
             rl.setLayoutParams(new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-            rl.setPadding(dp(2),dp(1),dp(2),dp(1));
+            rl.setPadding(dp(3),dp(2),dp(3),dp(2));
+            rl.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
             for (String k : row) {
                 Button b = new Button(this);
                 float w = switch (k) {
                     case " " -> 3f;
                     case "SEND" -> 2f;
-                    case "SHF","DEL" -> 1.5f;
+                    case "SHF","DEL","?123","ABC","SYM1","SYM2","=\\<" -> 1.5f;
                     default -> 1f;
                 };
-                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(44), w);
-                p.setMargins(1,1,1,1);
+                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(54), w);
+                p.setMargins(4,3,4,3);
                 b.setLayoutParams(p);
                 b.setPadding(0,0,0,0);
-                b.setText(k.equals("SHF") ? "⇧" : k.equals("DEL") ? "⌫" : k.equals(" ") ? "⎵" : k);
-                b.setTextSize(k.equals("SEND") ? 11 : 13);
-                b.setTextColor(Color.WHITE);
-                b.setBackgroundColor(k.equals("SEND") ? Color.parseColor("#6A1B9A") : keyColor(k));
+                String bDisp = switch (k) {
+                    case "SHF"  -> "⇧";
+                    case "DEL"  -> "⌫";
+                    case " "    -> "𝗖𝗩♞𝗞𝗜";
+                    case "SYM2","=\\<" -> "SYM2";
+                    case "SYM1" -> "SYM";
+                    default     -> isBrainNumSymMode ? k : (isShiftOn ? k.toUpperCase() : k);
+                };
+                b.setText(bDisp);
+                b.setTextSize(k.equals("SEND") ? 22 : bDisp.length() > 2 ? 18 : 26);
+                b.setBackground(roundedKey(switch (k) {
+                    case "SEND"  -> Color.parseColor("#FF6A1A");
+                    case "?123","ABC","SYM1","SYM2","=\\<" -> Color.parseColor("#222222");
+                    default -> {
+                        if (k.length() == 1 && Character.isDigit(k.charAt(0)))
+                            yield Color.parseColor("#2C1800");
+                        yield keyColor(k);
+                    }
+                }));
+                b.setTextColor(k.equals("SEND") ? Color.parseColor("#0A0A0A") : k.equals(" ") ? Color.parseColor("#FF6A1A") : Color.WHITE);
                 final String fk = k;
                 b.setOnClickListener(v -> handleBrainKey(fk));
                 rl.addView(b);
@@ -653,6 +826,7 @@ public class KeyboardService extends InputMethodService {
     }
 
     private void handleBrainKey(String key) {
+        vibrate();
         switch (key) {
             case "DEL" -> {
                 if (brainBuf.length() > 0) {
@@ -661,12 +835,16 @@ public class KeyboardService extends InputMethodService {
                 }
             }
             case "SEND" -> sendBrainMsg();
-            case "SHF"  -> { isShiftOn = !isShiftOn; }
+            case "SHF"  -> { isShiftOn = !isShiftOn; buildBrainKeyboard(); }
             case " "    -> { brainBuf.append(" "); updateBrainInput(); }
+            case "?123" -> { isBrainNumSymMode = true;  isBrainSymPage2 = false; buildBrainKeyboard(); }
+            case "ABC"  -> { isBrainNumSymMode = false; isBrainSymPage2 = false; buildBrainKeyboard(); }
+            case "SYM2","=\\<" -> { isBrainNumSymMode = true; isBrainSymPage2 = true;  buildBrainKeyboard(); }
+            case "SYM1" -> { isBrainNumSymMode = true;  isBrainSymPage2 = false; buildBrainKeyboard(); }
             default -> {
-                brainBuf.append(isShiftOn ? key.toUpperCase() : key.toLowerCase());
+                brainBuf.append(isShiftOn && !isBrainNumSymMode ? key.toUpperCase() : key);
                 updateBrainInput();
-                if (isShiftOn) isShiftOn = false;
+                if (isShiftOn && !isBrainNumSymMode) { isShiftOn = false; buildBrainKeyboard(); }
             }
         }
     }
@@ -679,46 +857,85 @@ public class KeyboardService extends InputMethodService {
     private void sendBrainMsg() {
         String msg = brainBuf.toString().trim();
         if (msg.isEmpty()) return;
-        tvBrainOut.append("You: " + msg + "\n");
+        addBubble(msg, true);   // user bubble (right)
         brainBuf.setLength(0);
         updateBrainInput();
-        tvBrainOut.append("CVA: thinking…\n");
+        android.view.View thinking = addBubble("…", false);  // thinking bubble
         svBrainOut.post(() -> svBrainOut.fullScroll(ScrollView.FOCUS_DOWN));
 
         exec.execute(() -> {
             String resp = brainAgent.chat(msg);
+            lastCvaReply = resp;
             ui.post(() -> {
-                String cur = tvBrainOut.getText().toString();
-                tvBrainOut.setText(cur.replace("CVA: thinking…\n",
-                        "CVA: " + resp + "\n\n"));
+                if (tvBrainOut != null) tvBrainOut.removeView(thinking);
+                addBubble(resp, false);  // CVA bubble (left)
                 svBrainOut.post(() -> svBrainOut.fullScroll(ScrollView.FOCUS_DOWN));
             });
         });
     }
 
+    /** Add a chat bubble. isUser=true → right/orange. isUser=false → left/dark. */
+    private android.view.View addBubble(String text, boolean isUser) {
+        android.widget.FrameLayout wrapper = new android.widget.FrameLayout(this);
+        LinearLayout.LayoutParams wp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        wp.setMargins(0, 2, 0, 2);
+        wrapper.setLayoutParams(wp);
+
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(12);
+        tv.setLineSpacing(2, 1);
+        tv.setPadding(dp(10), dp(7), dp(10), dp(7));
+
+        android.graphics.drawable.GradientDrawable bubble =
+                new android.graphics.drawable.GradientDrawable();
+        bubble.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+
+        android.widget.FrameLayout.LayoutParams tp;
+        if (isUser) {
+            // User: right-aligned orange bubble
+            bubble.setCornerRadii(new float[]{dp(14),dp(14), dp(4),dp(4), dp(14),dp(14), dp(14),dp(14)});
+            bubble.setColor(Color.parseColor("#FF6A1A"));
+            tv.setTextColor(Color.parseColor("#0A0A0A"));
+            tp = new android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
+            tp.gravity = android.view.Gravity.END;
+            tp.setMargins(dp(40), 0, 0, 0);
+        } else {
+            // CVA: left-aligned dark bubble with orange border
+            bubble.setCornerRadii(new float[]{dp(4),dp(4), dp(14),dp(14), dp(14),dp(14), dp(14),dp(14)});
+            bubble.setColor(Color.parseColor("#1A1A1A"));
+            bubble.setStroke(dp(1), Color.parseColor("#FF6A1A"));
+            tv.setTextColor(Color.parseColor("#E0E0E0"));
+            tp = new android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
+            tp.gravity = android.view.Gravity.START;
+            tp.setMargins(0, 0, dp(40), 0);
+        }
+        tv.setBackground(bubble);
+        tv.setLayoutParams(tp);
+        wrapper.addView(tv);
+        tvBrainOut.addView(wrapper);
+        return wrapper;
+    }
+
     private void importBrainToCursor() {
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
-        String[] lines = tvBrainOut.getText().toString().split("\n");
-        for (int i = lines.length - 1; i >= 0; i--) {
-            if (lines[i].startsWith("CVA: ") && !lines[i].contains("thinking")) {
-                ic.commitText(lines[i].substring(5).trim(), 1);
-                Toast.makeText(this, "CVA response imported ✓", Toast.LENGTH_SHORT).show();
-                return;
-            }
+        if (!lastCvaReply.isEmpty()) {
+            ic.commitText(lastCvaReply.trim(), 1);
+            Toast.makeText(this, "CVA response imported ✓", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "No CVA response yet", Toast.LENGTH_SHORT).show();
         }
     }
 
     private void toggleBrainKb() {
-        brainKbVisible = !brainKbVisible;
-        if (brainKbVisible) {
-            svBrainOut  .setVisibility(View.GONE);
-            brainSlideKb.setVisibility(View.VISIBLE);
-            slideUp(brainSlideKb);
-        } else {
-            brainSlideKb.setVisibility(View.GONE);
-            svBrainOut  .setVisibility(View.VISIBLE);
-        }
+        // Keyboard is always visible — nothing to toggle
     }
 
     // =========================================================================
@@ -735,6 +952,12 @@ public class KeyboardService extends InputMethodService {
             svTermOut.post(() -> svTermOut.fullScroll(ScrollView.FOCUS_DOWN));
     }
 
+    private void animPress(View v) {
+        v.animate().scaleX(0.95f).scaleY(0.95f).setDuration(70)
+                .withEndAction(() -> v.animate().scaleX(1f).scaleY(1f).setDuration(70).start())
+                .start();
+    }
+
     private void slideUp(View v) {
         v.post(() -> {
             TranslateAnimation anim = new TranslateAnimation(0, 0, v.getHeight(), 0);
@@ -744,7 +967,33 @@ public class KeyboardService extends InputMethodService {
         });
     }
 
+    // ── Agent status ticker ───────────────────────────────────────────────────
+    private void showAgentStatus(String msg) {
+        if (sectionBrain == null) return;
+        android.widget.TextView tv = sectionBrain.findViewById(R.id.tv_agent_status);
+        if (tv == null) return;
+        tv.setVisibility(View.VISIBLE);
+        tv.setText(msg);
+        tv.setSelected(true); // enable marquee
+        // Auto-hide after 8 seconds of no updates
+        tv.removeCallbacks(null);
+        tv.postDelayed(() -> tv.setVisibility(View.GONE), 8000);
+        // Also add as a small info bubble
+        addBubble(msg, false);
+    }
+
     private int dp(int dp) {
         return (int)(dp * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    // ── Haptic feedback ───────────────────────────────────────────────────────
+    private void vibrate() {
+        Vibrator vib = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        if (vib == null || !vib.hasVibrator()) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vib.vibrate(VibrationEffect.createOneShot(45, 200));
+        } else {
+            vib.vibrate(45);
+        }
     }
 }

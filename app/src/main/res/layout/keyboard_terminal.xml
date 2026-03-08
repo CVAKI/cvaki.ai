@@ -8,10 +8,12 @@
     <!-- ── Top bar ────────────────────────────────────────────────────────── -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="22dp"
+        android:layout_height="28dp"
         android:orientation="horizontal"
+        android:gravity="center_vertical"
         android:background="#001A00">
 
+        <!-- Shell status label -->
         <TextView
             android:id="@+id/tv_term_shell_label"
             android:layout_width="0dp"
@@ -21,37 +23,64 @@
             android:textColor="#00FF41"
             android:textSize="9sp"
             android:gravity="center_vertical"
-            android:paddingStart="6dp"/>
+            android:paddingStart="8dp"
+            android:fontFamily="monospace"/>
 
+        <!-- Reset button -->
         <Button
             android:id="@+id/btn_term_restart"
-            android:layout_width="52dp"
+            android:layout_width="56dp"
             android:layout_height="match_parent"
-            android:text="↺ Reset"
-            android:textSize="8sp"
-            android:textColor="#FFFFFF"
-            android:background="#1A1A00"
-            android:padding="0dp"/>
+            android:text="↺"
+            android:textSize="14sp"
+            android:textColor="#AAAAAA"
+            android:background="#0A1A0A"
+            android:padding="0dp"
+            android:stateListAnimator="@null"/>
 
+        <!-- Toggle output height -->
         <Button
             android:id="@+id/btn_toggle_output"
-            android:layout_width="60dp"
+            android:layout_width="64dp"
             android:layout_height="match_parent"
-            android:text="▲ Output"
+            android:text="▲ Out"
             android:textSize="9sp"
             android:textColor="#000000"
             android:background="#00FF41"
-            android:padding="0dp"/>
+            android:padding="0dp"
+            android:stateListAnimator="@null"/>
 
-        <Button
-            android:id="@+id/btn_import_right"
-            android:layout_width="55dp"
+        <!-- LIVE toggle switch — right side, glows green when ON -->
+        <LinearLayout
+            android:layout_width="wrap_content"
             android:layout_height="match_parent"
-            android:text="←In"
-            android:textSize="9sp"
-            android:textColor="#FFFFFF"
-            android:background="#1A3A1A"
-            android:padding="0dp"/>
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:background="#001200">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="LIVE"
+                android:textColor="#555555"
+                android:textSize="8sp"
+                android:letterSpacing="0.2"
+                android:fontFamily="monospace"
+                android:layout_marginEnd="4dp"/>
+
+            <android.widget.Switch
+                android:id="@+id/switch_live_import"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:showText="false"
+                android:thumbTint="#444444"
+                android:trackTint="#1A1A1A"
+                android:scaleX="0.85"
+                android:scaleY="0.85"/>
+
+        </LinearLayout>
 
     </LinearLayout>
 
@@ -76,37 +105,27 @@
 
     </ScrollView>
 
-    <!-- ── Input line — always visible, shows what you're typing ─────────── -->
+    <!-- ── Input line ─────────────────────────────────────────────────────── -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="28dp"
         android:orientation="horizontal"
+        android:gravity="center_vertical"
         android:background="#001200">
 
         <TextView
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
             android:id="@+id/tv_term_input_line"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
             android:text="$ █"
             android:textColor="#00FF41"
             android:textSize="12sp"
             android:fontFamily="monospace"
             android:gravity="center_vertical"
-            android:paddingStart="6dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
             android:singleLine="true"
             android:ellipsize="start"/>
-
-        <Button
-            android:id="@+id/btn_import_left"
-            android:layout_width="55dp"
-            android:layout_height="match_parent"
-            android:text="←In"
-            android:textSize="9sp"
-            android:textStyle="bold"
-            android:textColor="#00FF41"
-            android:background="#0A1A0A"
-            android:padding="0dp"/>
 
     </LinearLayout>
 
@@ -119,7 +138,7 @@
         android:background="#000814"
         android:padding="2dp"/>
 
-    <!-- Keep this view for legacy reference but it is not used for hiding anymore -->
+    <!-- Legacy stub — kept so existing code references don't break -->
     <LinearLayout
         android:id="@+id/terminal_slide_keyboard"
         android:layout_width="match_parent"

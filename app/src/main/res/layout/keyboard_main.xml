@@ -3,16 +3,18 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="#0D0D1A">
+    android:background="#0A0A0A">
 
-    <!-- ── Navigation bar ──────────────────────────────────────────────── -->
+    <!-- ── Navigation bar ──────────────────────────────────────────────────── -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="42dp"
+        android:layout_height="40dp"
         android:orientation="horizontal"
-        android:background="#08080F"
-        android:paddingStart="2dp"
-        android:paddingEnd="2dp">
+        android:background="#0F0F0F"
+        android:paddingStart="3dp"
+        android:paddingEnd="3dp"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp">
 
         <Button
             android:id="@+id/btn_nav_normal"
@@ -21,9 +23,11 @@
             android:layout_weight="1"
             android:text="⌨ Keys"
             android:textSize="11sp"
-            android:textColor="#FFFFFF"
-            android:background="#536DFE"
-            android:layout_margin="2dp"
+            android:textColor="#0A0A0A"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"
+            android:background="#FF6A1A"
+            android:layout_marginEnd="2dp"
             android:padding="0dp" />
 
         <Button
@@ -33,9 +37,10 @@
             android:layout_weight="1"
             android:text="# Hash"
             android:textSize="11sp"
-            android:textColor="#FFFFFF"
-            android:background="#263238"
-            android:layout_margin="2dp"
+            android:textColor="#888888"
+            android:fontFamily="sans-serif-medium"
+            android:background="#1A1A1A"
+            android:layout_marginEnd="2dp"
             android:padding="0dp" />
 
         <Button
@@ -45,9 +50,10 @@
             android:layout_weight="1"
             android:text=">_ Term"
             android:textSize="11sp"
-            android:textColor="#FFFFFF"
-            android:background="#263238"
-            android:layout_margin="2dp"
+            android:textColor="#888888"
+            android:fontFamily="sans-serif-medium"
+            android:background="#1A1A1A"
+            android:layout_marginEnd="2dp"
             android:padding="0dp" />
 
         <Button
@@ -55,16 +61,22 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:text="🧠 CVA"
+            android:text="🦊 CVA"
             android:textSize="11sp"
-            android:textColor="#FFFFFF"
-            android:background="#263238"
-            android:layout_margin="2dp"
+            android:textColor="#888888"
+            android:fontFamily="sans-serif-medium"
+            android:background="#1A1A1A"
             android:padding="0dp" />
 
     </LinearLayout>
 
-    <!-- ── Section container ───────────────────────────────────────────── -->
+    <!-- Thin orange accent line under nav -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#FF6A1A" />
+
+    <!-- ── Section container ───────────────────────────────────────────────── -->
 
     <include
         android:id="@+id/section_normal"

@@ -3,74 +3,49 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="#0A0A0F">
+    android:background="#0A0A0A">
 
-    <!-- ── Chat output area + side import buttons ────────────────────────── -->
-    <RelativeLayout
+    <!-- ── Chat bubble scroll area ──────────────────────────────────────── -->
+    <ScrollView
+        android:id="@+id/sv_brain_output"
         android:layout_width="match_parent"
-        android:layout_height="175dp">
+        android:layout_height="150dp"
+        android:background="#0A0A0A"
+        android:scrollbars="none"
+        android:fillViewport="true">
 
-        <!-- Left import button -->
-        <Button
-            android:id="@+id/btn_brain_import_left"
-            android:layout_width="36dp"
-            android:layout_height="match_parent"
-            android:layout_alignParentStart="true"
-            android:text="←"
-            android:textSize="16sp"
-            android:textColor="#CE93D8"
-            android:background="#100010"
-            android:padding="0dp"
-            android:contentDescription="Import left" />
-
-        <!-- Right import button -->
-        <Button
-            android:id="@+id/btn_brain_import_right"
-            android:layout_width="36dp"
-            android:layout_height="match_parent"
-            android:layout_alignParentEnd="true"
-            android:text="→"
-            android:textSize="16sp"
-            android:textColor="#CE93D8"
-            android:background="#100010"
-            android:padding="0dp"
-            android:contentDescription="Import right" />
-
-        <!-- Brain chat output -->
-        <ScrollView
-            android:id="@+id/sv_brain_output"
+        <!-- Bubble container — messages injected here programmatically -->
+        <LinearLayout
+            android:id="@+id/tv_brain_output"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:layout_toEndOf="@id/btn_brain_import_left"
-            android:layout_toStartOf="@id/btn_brain_import_right"
-            android:background="#0A0A0F"
-            android:scrollbars="vertical">
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="4dp"
+            android:clipToPadding="false" />
 
-            <TextView
-                android:id="@+id/tv_brain_output"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textColor="#E0E0E0"
-                android:textSize="12sp"
-                android:padding="6dp"
-                android:lineSpacingExtra="2dp"
-                android:text="🧠 CVA Brain ready.\nType a message below and tap Send.\n\n" />
+    </ScrollView>
 
-        </ScrollView>
-
-    </RelativeLayout>
+    <!-- Thin orange divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#FF6A1A" />
 
     <!-- ── Input indicator ───────────────────────────────────────────────── -->
     <TextView
         android:id="@+id/tv_brain_input"
         android:layout_width="match_parent"
-        android:layout_height="26dp"
+        android:layout_height="30dp"
         android:text="> █"
-        android:textColor="#CE93D8"
-        android:textSize="12sp"
+        android:textColor="#FF6A1A"
+        android:textSize="13sp"
         android:fontFamily="monospace"
-        android:background="#0D0018"
-        android:paddingStart="8dp"
+        android:background="#0F0F0F"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
         android:gravity="center_vertical" />
 
     <!-- ── Action bar ────────────────────────────────────────────────────── -->
@@ -78,47 +53,83 @@
         android:layout_width="match_parent"
         android:layout_height="30dp"
         android:orientation="horizontal"
-        android:background="#0D0018">
+        android:background="#0A0A0A">
+
+        <Button
+            android:id="@+id/btn_brain_import_left"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="⬆ Import"
+            android:textSize="10sp"
+            android:textColor="#FF6A1A"
+            android:background="#141414"
+            android:padding="0dp" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="match_parent"
+            android:background="#1A1A1A" />
 
         <Button
             android:id="@+id/btn_api_key"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:text="🔑 API Key"
+            android:text="↺ Refresh"
             android:textSize="10sp"
-            android:textColor="#CE93D8"
-            android:background="@android:color/transparent"
+            android:textColor="#FF6A1A"
+            android:background="#141414"
             android:padding="0dp" />
 
-        <Button
-            android:id="@+id/btn_show_brain_keyboard"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:text="⌨ Type"
-            android:textSize="10sp"
-            android:textColor="#000000"
-            android:background="#9C27B0"
-            android:padding="0dp" />
+        <!-- kept for Java compat only -->
+        <Button android:id="@+id/btn_brain_import_right"
+            android:layout_width="0dp" android:layout_height="0dp"
+            android:visibility="gone" android:padding="0dp" />
+        <Button android:id="@+id/btn_show_brain_keyboard"
+            android:layout_width="0dp" android:layout_height="0dp"
+            android:visibility="gone" android:padding="0dp" />
 
     </LinearLayout>
 
-    <!-- ── Slide-up brain keyboard (hidden by default) ───────────────────── -->
+    <!-- ── Agent status ticker (shown during agentic execution) ────────────── -->
+    <TextView
+        android:id="@+id/tv_agent_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="0dp"
+        android:text=""
+        android:textColor="#00FF88"
+        android:textSize="9sp"
+        android:fontFamily="monospace"
+        android:background="#050505"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:visibility="gone"
+        android:singleLine="true"
+        android:ellipsize="marquee"
+        android:marqueeRepeatLimit="marquee_forever"
+        android:focusable="true"
+        android:focusableInTouchMode="true" />
+
+    <!-- ── Brain keyboard — ALWAYS VISIBLE ──────────────────────────────── -->
     <LinearLayout
         android:id="@+id/brain_slide_keyboard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:background="#0D0018"
-        android:visibility="gone">
+        android:background="#0A0A0A"
+        android:visibility="visible">
 
         <LinearLayout
             android:id="@+id/brain_keyboard_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="2dp" />
+            android:paddingTop="2dp"
+            android:paddingBottom="4dp" />
 
     </LinearLayout>
 

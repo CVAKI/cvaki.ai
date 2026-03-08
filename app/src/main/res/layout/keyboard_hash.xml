@@ -3,68 +3,82 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="#0D0D1A"
+    android:background="#0A0A0A"
     android:paddingBottom="4dp">
 
     <!-- ── Banner ─────────────────────────────────────────────────────────── -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="22dp"
+        android:layout_height="26dp"
         android:orientation="horizontal"
-        android:background="#08080F">
+        android:background="#0F0F0F"
+        android:gravity="center_vertical">
+
+        <!-- Orange left accent bar -->
+        <View
+            android:layout_width="3dp"
+            android:layout_height="match_parent"
+            android:background="#FF6A1A"/>
 
         <TextView
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:text="# HASH MODE  —  keys normal, output encrypted"
+            android:text="# HASH MODE  —  output encrypted"
             android:textSize="9sp"
-            android:textColor="#536DFE"
+            android:textColor="#FF6A1A"
             android:gravity="center_vertical"
-            android:paddingStart="6dp"/>
+            android:letterSpacing="0.1"
+            android:fontFamily="sans-serif-medium"
+            android:paddingStart="8dp"/>
 
         <!-- Toggle translator -->
         <Button
             android:id="@+id/btn_toggle_translator"
-            android:layout_width="90dp"
+            android:layout_width="88dp"
             android:layout_height="match_parent"
             android:text="⇄ Translate"
             android:textSize="9sp"
-            android:textColor="#FFFFFF"
-            android:background="#283593"
+            android:textColor="#0A0A0A"
+            android:fontFamily="sans-serif-medium"
+            android:background="#FF6A1A"
             android:padding="0dp"/>
 
     </LinearLayout>
 
-    <!-- ── Translator panel (hidden by default) ───────────────────────────── -->
+    <!-- ── Translator panel (hidden by default) ──────────────────────────── -->
     <LinearLayout
         android:id="@+id/translator_panel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:background="#0A0A1E"
-        android:padding="6dp"
+        android:background="#0F0F0F"
+        android:padding="8dp"
         android:visibility="gone">
 
-        <!-- Input row -->
+        <!-- Label -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Paste hashed OR plain text here:"
-            android:textColor="#90A4AE"
-            android:textSize="10sp"
-            android:paddingBottom="3dp"/>
+            android:text="PASTE HASHED OR PLAIN TEXT"
+            android:textColor="#555555"
+            android:textSize="9sp"
+            android:letterSpacing="0.2"
+            android:fontFamily="sans-serif-medium"
+            android:paddingBottom="5dp"/>
 
+        <!-- Input field -->
         <EditText
             android:id="@+id/et_translate_input"
             android:layout_width="match_parent"
-            android:layout_height="60dp"
+            android:layout_height="56dp"
             android:hint="Paste text to translate…"
             android:textColor="#FFFFFF"
-            android:textColorHint="#555555"
-            android:background="#1A1A2E"
-            android:padding="6dp"
+            android:textColorHint="#333333"
+            android:background="#141414"
+            android:padding="8dp"
             android:textSize="12sp"
+            android:fontFamily="monospace"
             android:gravity="top"
             android:inputType="textMultiLine"
             android:scrollbars="vertical"/>
@@ -72,9 +86,9 @@
         <!-- Action buttons -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="36dp"
+            android:layout_height="34dp"
             android:orientation="horizontal"
-            android:layout_marginTop="4dp">
+            android:layout_marginTop="5dp">
 
             <Button
                 android:id="@+id/btn_hash_to_plain"
@@ -82,10 +96,11 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:text="Hash → Plain"
-                android:textSize="10sp"
-                android:textColor="#FFFFFF"
-                android:background="#1A237E"
-                android:layout_marginEnd="3dp"
+                android:textSize="9sp"
+                android:textColor="#CCCCCC"
+                android:fontFamily="sans-serif-medium"
+                android:background="#1A1A1A"
+                android:layout_marginEnd="2dp"
                 android:padding="0dp"/>
 
             <Button
@@ -94,10 +109,11 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:text="Plain → Hash"
-                android:textSize="10sp"
-                android:textColor="#FFFFFF"
-                android:background="#4A148C"
-                android:layout_marginEnd="3dp"
+                android:textSize="9sp"
+                android:textColor="#0A0A0A"
+                android:fontFamily="sans-serif-medium"
+                android:background="#FF6A1A"
+                android:layout_marginEnd="2dp"
                 android:padding="0dp"/>
 
             <Button
@@ -106,36 +122,47 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:text="📋 Copy"
-                android:textSize="10sp"
-                android:textColor="#FFFFFF"
-                android:background="#004D40"
+                android:textSize="9sp"
+                android:textColor="#CCCCCC"
+                android:fontFamily="sans-serif-medium"
+                android:background="#1A1A1A"
                 android:padding="0dp"/>
 
         </LinearLayout>
 
-        <!-- Output -->
+        <!-- Result label -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Result:"
-            android:textColor="#90A4AE"
-            android:textSize="10sp"
-            android:paddingTop="6dp"
-            android:paddingBottom="2dp"/>
+            android:text="RESULT"
+            android:textColor="#555555"
+            android:textSize="9sp"
+            android:letterSpacing="0.2"
+            android:fontFamily="sans-serif-medium"
+            android:paddingTop="8dp"
+            android:paddingBottom="4dp"/>
 
+        <!-- Output -->
         <TextView
             android:id="@+id/tv_translate_output"
             android:layout_width="match_parent"
-            android:layout_height="60dp"
+            android:layout_height="56dp"
             android:text="—"
-            android:textColor="#00E5FF"
+            android:textColor="#FF6A1A"
             android:textSize="12sp"
-            android:background="#050510"
-            android:padding="6dp"
+            android:fontFamily="monospace"
+            android:background="#141414"
+            android:padding="8dp"
             android:scrollbars="vertical"
             android:textIsSelectable="true"/>
 
     </LinearLayout>
+
+    <!-- Thin separator -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#1A1A1A"/>
 
     <!-- ── Keyboard rows (built programmatically) ─────────────────────────── -->
     <LinearLayout
@@ -143,6 +170,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="3dp"/>
+        android:paddingStart="3dp"
+        android:paddingEnd="3dp"
+        android:paddingTop="3dp"/>
 
 </LinearLayout>
