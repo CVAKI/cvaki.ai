@@ -402,7 +402,115 @@
             </LinearLayout>
 
             <!-- ──────────────────────────────────────────────── -->
-            <!--  § 5  MEMORY                                     -->
+            <!--  § 5  SCREEN AGENT                               -->
+            <!-- ──────────────────────────────────────────────── -->
+            <LinearLayout
+                android:id="@+id/section_agent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="20dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="10dp">
+                    <View android:layout_width="3dp" android:layout_height="18dp"
+                        android:background="#FF6A1A" android:layout_marginEnd="10dp"/>
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="SCREEN AGENT"
+                        android:textColor="#FF6A1A" android:textSize="11sp"
+                        android:letterSpacing="0.3" android:fontFamily="sans-serif-medium"/>
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="05" android:textColor="#2A2A2A"
+                        android:textSize="22sp" android:fontFamily="sans-serif-black"/>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@drawable/bg_card_elevated"
+                    android:padding="12dp">
+
+                    <!-- Task description label -->
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="TASK  ·  WHAT SHOULD CVA DO?" android:textColor="#3A3A3A"
+                        android:textSize="9sp" android:letterSpacing="0.25"
+                        android:fontFamily="sans-serif-medium" android:paddingBottom="5dp"/>
+
+                    <!-- Task input -->
+                    <EditText
+                        android:id="@+id/et_agent_task"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="e.g.  Answer the MCQ question on screen"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#2A2A2A"
+                        android:textSize="13sp"
+                        android:fontFamily="monospace"
+                        android:background="@drawable/bg_edittext"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp"
+                        android:paddingTop="12dp"
+                        android:paddingBottom="12dp"
+                        android:inputType="textMultiLine"
+                        android:minLines="2"
+                        android:maxLines="4"
+                        android:layout_marginBottom="12dp"/>
+
+                    <!-- Button row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="10dp">
+
+                        <Button
+                            android:id="@+id/btn_launch_agent"
+                            android:layout_width="0dp"
+                            android:layout_height="52dp"
+                            android:layout_weight="1"
+                            android:text="▶  LAUNCH" android:textSize="11sp"
+                            android:letterSpacing="0.15" android:textColor="#0A0A0A"
+                            android:background="@drawable/bg_btn_primary"
+                            android:fontFamily="sans-serif-black"
+                            android:stateListAnimator="@null"
+                            android:layout_marginEnd="6dp"/>
+
+                        <Button
+                            android:id="@+id/btn_update_task"
+                            android:layout_width="0dp"
+                            android:layout_height="52dp"
+                            android:layout_weight="1"
+                            android:text="↺  UPDATE" android:textSize="11sp"
+                            android:letterSpacing="0.15" android:textColor="#FF6A1A"
+                            android:background="@drawable/bg_btn_ghost"
+                            android:fontFamily="sans-serif-medium"
+                            android:stateListAnimator="@null"/>
+
+                    </LinearLayout>
+
+                    <!-- Helper hint -->
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="▶ LAUNCH — first run, asks screen-record permission once\n↺ UPDATE — change task while agent bubble is already running"
+                        android:textColor="#3A3A3A"
+                        android:textSize="9sp"
+                        android:letterSpacing="0.1"
+                        android:fontFamily="sans-serif-medium"
+                        android:lineSpacingMultiplier="1.4"/>
+
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- ──────────────────────────────────────────────── -->
+            <!--  § 6  MEMORY                                     -->
             <!-- ──────────────────────────────────────────────── -->
             <LinearLayout
                 android:id="@+id/section_memory"
@@ -424,7 +532,7 @@
                         android:textColor="#FF6A1A" android:textSize="11sp"
                         android:letterSpacing="0.3" android:fontFamily="sans-serif-medium"/>
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="05" android:textColor="#2A2A2A"
+                        android:text="06" android:textColor="#2A2A2A"
                         android:textSize="22sp" android:fontFamily="sans-serif-black"/>
                 </LinearLayout>
 

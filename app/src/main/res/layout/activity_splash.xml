@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/splash_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#141414">
+
+    <!-- Scanline overlay (animated in SplashActivity) -->
+    <View
+        android:id="@+id/splash_scanlines"
+        android:layout_width="match_parent"
+        android:layout_height="200dp"
+        android:background="@drawable/splash_scanlines"
+        android:alpha="0"/>
+
+    <!-- Centre column -->
+
+    <!-- splash_tv_cva kept as a gone stub so SplashActivity.java compiles unchanged -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingBottom="48dp">
+
+        <!-- Fox logo — animated via splash_logo_ring id in SplashActivity -->
+        <ImageView
+            android:id="@+id/splash_logo_ring"
+            android:layout_width="300dp"
+            android:layout_height="300dp"
+            android:layout_gravity="center_horizontal"
+            android:contentDescription="CVAKI logo"
+            android:scaleType="fitCenter"
+            android:src="@drawable/cvaki" />
+
+        <!-- 28 dp gap -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="28dp" />
+
+        <!-- CVAKI  AI -->
+        <TextView
+            android:id="@+id/splash_tv_cvaki"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.30"
+            android:text="CVAKI.AI"
+            android:textColor="#DDDDDD"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <!-- 10 dp gap -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="10dp" />
+
+        <!-- Tagline -->
+        <TextView
+            android:id="@+id/splash_tv_tagline"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.18"
+            android:text="Cognitive Virtual Agent"
+            android:textColor="#999999"
+            android:textSize="12sp" />
+
+        <!-- 40 dp gap -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="40dp" />
+
+        <!-- Thin orange divider -->
+        <View
+            android:layout_width="120dp"
+            android:layout_height="1dp"
+            android:layout_gravity="center_horizontal"
+            android:alpha="0.40"
+            android:background="#FF6A1A" />
+
+        <!-- 14 dp gap -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="14dp" />
+
+        <!-- powered by BrainGods -->
+        <TextView
+            android:id="@+id/splash_tv_powered"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.14"
+            android:text="powered by  BrainGods"
+            android:textColor="#FF6A1A"
+            android:textSize="11sp" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/splash_tv_cva"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        android:text=""/>
+
+    <!-- Corner label top-left -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="18dp"
+        android:text="[ CVA ]"
+        android:textColor="#1A1A1A"
+        android:textSize="9sp"
+        android:fontFamily="monospace"
+        android:letterSpacing="0.20"/>
+
+    <!-- Version bottom-right -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="18dp"
+        android:text="v1.0"
+        android:textColor="#222222"
+        android:textSize="9sp"
+        android:fontFamily="monospace"/>
+
+</FrameLayout>

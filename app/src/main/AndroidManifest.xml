@@ -3,11 +3,22 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.braingods.cva">
 
-    <!-- ── Permissions ──────────────────────────────────────────────────── -->
+    <!-- ── Core ─────────────────────────────────────────────────────────── -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Overlay (float bubble) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Foreground services -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Accessibility (gesture injection) -->
+    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Storage -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -28,16 +39,7 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
-    <uses-permission android:name="android.permission.VIBRATE" />
-
-    <!-- Screen capture (MediaProjection) -->
-    <uses-permission android:name="android.permission.CAPTURE_VIDEO_OUTPUT" />
-
-    <!-- Vibration for key clicks -->
-    <uses-permission android:name="android.permission.VIBRATE" />
-
-    <!-- Network state -->
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="true"
@@ -50,17 +52,37 @@
         android:extractNativeLibs="true"
         xmlns:tools="http://schemas.android.com/tools">
 
-        <!-- ── Settings / Launcher Activity ──────────────────────────────── -->
+        <!-- ── Splash — launcher entry point ──────────────────────────────── -->
         <activity
-            android:name=".MainActivity"
+            android:name=".SplashActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.AppCompat.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- ── Main / Settings Activity ───────────────────────────────────── -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:launchMode="singleTop" />
+
+        <!-- ── Screen capture permission trampoline ────────────────────────── -->
+        <!--
+            Transparent activity that shows the "Start recording?" dialog.
+            On result it calls startForegroundService(SmartOverlayService)
+            and passes the raw projection token — getMediaProjection() is
+            called inside the service, satisfying the Android 14+ requirement.
+        -->
+        <activity
+            android:name=".ScreenCapturePermissionActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="false" />
 
         <!-- ── IME Service ────────────────────────────────────────────────── -->
         <service
@@ -76,11 +98,34 @@
                 android:resource="@xml/method" />
         </service>
 
-        <!-- ── CVA Overlay Service ────────────────────────────────────────── -->
+        <!-- ── Basic float overlay (original, kept for compatibility) ──────── -->
         <service
             android:name=".OverlayService"
             android:exported="false"
             android:foregroundServiceType="specialUse" />
+
+        <!-- ── Smart AI overlay (screen capture + gesture automation) ──────── -->
+        <!--
+            foregroundServiceType="mediaProjection" is REQUIRED on Android 14+.
+            Without it, getMediaProjection() throws SecurityException.
+        -->
+        <service
+            android:name=".SmartOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <!-- ── Accessibility Service (tap/swipe/type injection) ───────────── -->
+        <service
+            android:name=".CVAAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
     </application>
 

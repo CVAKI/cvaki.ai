@@ -40,10 +40,16 @@ public class TerminalBootstrap {
 
     private static final String TAG = "TerminalBootstrap";
 
-    // jsDelivr CDN — confirmed working (arm64=2729KB, has hush+bash)
-    private static final String URL_ARM64  = "https://cdn.jsdelivr.net/gh/EXALAB/Busybox-static@main/busybox_arm64";
-    private static final String URL_ARM    = "https://cdn.jsdelivr.net/gh/EXALAB/Busybox-static@main/busybox_arm";
-    private static final String URL_X86_64 = "https://cdn.jsdelivr.net/gh/EXALAB/Busybox-static@main/busybox_amd64";
+    // Primary: busybox.net official static binaries (most reliable, full applet set)
+    // Fallback: EXALAB jsDelivr CDN
+    private static final String URL_ARM64_PRIMARY  = "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox_ARM64";
+    private static final String URL_ARM64_FALLBACK = "https://cdn.jsdelivr.net/gh/EXALAB/Busybox-static@main/busybox_arm64";
+    private static final String URL_ARM_PRIMARY    = "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox_ARMV7l";
+    private static final String URL_ARM_FALLBACK   = "https://cdn.jsdelivr.net/gh/EXALAB/Busybox-static@main/busybox_arm";
+    private static final String URL_X86_64         = "https://cdn.jsdelivr.net/gh/EXALAB/Busybox-static@main/busybox_amd64";
+    // Keep these for the existing getUrl() helper
+    private static final String URL_ARM64  = URL_ARM64_PRIMARY;
+    private static final String URL_ARM    = URL_ARM_PRIMARY;
 
     private final Context ctx;
 
@@ -163,18 +169,34 @@ public class TerminalBootstrap {
 
         // ── Download ──────────────────────────────────────────────────────────
         String abi = Build.SUPPORTED_ABIS[0];
-        String url = abi.contains("arm64") || abi.contains("aarch64") ? URL_ARM64
-                : abi.contains("x86_64") || abi.contains("amd64")  ? URL_X86_64
-                : URL_ARM;
+        boolean isArm64  = abi.contains("arm64") || abi.contains("aarch64");
+        boolean isX86_64 = abi.contains("x86_64") || abi.contains("amd64");
+
+        // Try primary then fallback URL
+        String[] urls;
+        if (isArm64)       urls = new String[]{ URL_ARM64_PRIMARY,  URL_ARM64_FALLBACK };
+        else if (isX86_64) urls = new String[]{ URL_X86_64 };
+        else               urls = new String[]{ URL_ARM_PRIMARY,    URL_ARM_FALLBACK };
 
         cb.onProgress("Downloading BusyBox for " + abi + "...");
 
-        try {
-            File tmp  = new File(ctx.getCacheDir(), "busybox.tmp");
-            downloadFile(url, tmp, cb);
+        File tmp = new File(ctx.getCacheDir(), "busybox.tmp");
+        boolean downloaded = false;
+        for (String url : urls) {
+            try {
+                cb.onProgress("Trying: " + url);
+                if (tmp.exists()) tmp.delete();
+                downloadFile(url, tmp, cb);
+                if (tmp.exists() && tmp.length() > 500_000) { downloaded = true; break; }
+                cb.onProgress("[Retry] Too small (" + tmp.length() + " B), trying next URL...");
+            } catch (Exception e) {
+                cb.onProgress("[Retry] " + e.getMessage());
+            }
+        }
 
-            if (!tmp.exists() || tmp.length() < 500_000) {
-                cb.onProgress("[ERROR] Download too small (" + tmp.length() + " B)");
+        try {
+            if (!downloaded) {
+                cb.onProgress("[ERROR] All download sources failed");
                 cb.onDone(false, null);
                 return;
             }
@@ -235,9 +257,13 @@ public class TerminalBootstrap {
     }
 
     private String getBashrc(String binPath, String homePath, String tmpPath, String bbPath) {
+        // ── Bashrc with full CVA interface ────────────────────────────────────
+        // shopt guards: busybox sh doesn't have shopt, only real bash does
         return
                 "case $- in\n    *i*) ;;\n      *) return;;\nesac\n" +
-                        "HISTCONTROL=ignoreboth\nHISTSIZE=1000\n" +
+                        "HISTCONTROL=ignoreboth\n" +
+                        "HISTSIZE=1000\n" +
+                        "command -v shopt >/dev/null 2>&1 && { shopt -s histappend; shopt -s checkwinsize; }\n" +
                         "export PATH=\"" + binPath + ":/system/bin:/system/xbin\"\n" +
                         "export HOME=\"" + homePath + "\"\n" +
                         "export TMPDIR=\"" + tmpPath + "\"\n" +
@@ -246,18 +272,48 @@ public class TerminalBootstrap {
                         "alias cls='clear'\nalias grep='grep --color=auto'\n" +
                         "alias busybox='" + bbPath + "'\n" +
                         "clear\n" +
+                        "echo \"\"\n" +
                         "echo -e \"========================================================\"\n" +
-                        "echo -e \"\\e[1;96m ██████╗\\e[1;91m           _____   __          .____  \"\n" +
-                        "echo -e \"\\e[1;96m██╔════╝\\e[1;91m   ____   /  _  \\/  | __._.| \\e[1;92mc\\e[1;91m  |  \"\n" +
-                        "echo -e \"\\e[1;96m██║     \\e[1;91m  /  _ \\ /  /_\\  \\   __|   |  || \\e[1;92mv\\e[1;91m  |   \"\n" +
-                        "echo -e \"\\e[1;96m██║     \\e[1;91m ( \\e[1;92m (\\u2623)\\e[1;91m )    |    \\  |  \\___  || \\e[1;92ma\\e[1;91m  |___ \"\n" +
-                        "echo -e \"\\e[1;96m╚██████╗\\e[1;91m  \\/\\|__  /|  / ____|  |\\/| \\\\___  |\"\n" +
-                        "echo -e \"\\e[1;96m ╚═════╝\\e[1;91m                \\/      \\/      \\/\\e[1;92m powered by\"\n" +
+                        "echo -e \"\\e[1;96m \u2588\u2588\u2588\u2588\u2588\u2588\u2557\\e[1;91m           _____   __          .____  \"\n" +
+                        "echo -e \"\\e[1;96m\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\\e[1;91m   ____   /  _  \\/  | __._.| \\e[1;92mc\\e[1;91m  |  \"\n" +
+                        "echo -e \"\\e[1;96m\u2588\u2588\u2551     \\e[1;91m  /  _ \\ /  /_\\\\  \\\\   __|   |  || \\e[1;92mv\\e[1;91m  |   \"\n" +
+                        "echo -e \"\\e[1;96m\u2588\u2588\u2551     \\e[1;91m ( \\e[1;92m (\u2623)\\e[1;91m )    |    \\\\  |  \\\\___  || \\e[1;92ma\\e[1;91m  |___ \"\n" +
+                        "echo -e \"\\e[1;96m\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\\e[1;91m  \\/\\\\|__  /|  / ____||  ______\\\\ \"\n" +
+                        "echo -e \"\\e[1;96m \u255a\u2550\u2550\u2550\u2550\u2550\u255d\\e[1;91m                \\/      \\/      \\/\\e[1;92m powered by\"\n" +
                         "echo -e \"\\e[1;96m                                                     CVAKI\"\n" +
-                        "echo -e \"\\e[1;95m§§§§§§§§§§§§§§§§§§§§§§§_{GODKILLER}_§§§§§§§§§§§§§§§§§§§§§§§\"\n" +
-                        "echo -e \"\\e[1;93m MY-IP: { $(wget -qO- --timeout=3 ifconfig.me 2>/dev/null || echo 'offline') }\"\n" +
+                        "echo -e \"\\e[1;95m                     /|\"\n" +
+                        "echo -e \"\\e[1;95m                    | \u2807\"\n" +
+                        "echo -e \"\\e[1;94m      \u28c0\u2840\u2840\u2840\u2840\u2820\u2800\u2830\u2836\u28c6\u2843\u2840\u2840\\e[1;95m  \u2830\u28b6|\\e[1;90m\u28c6\u2843\u2843\u2843\u2840\u2840  \\e[1;94m.\u28c0\u2840\u2840\u2840\"\n" +
+                        "echo -e \"\\e[1;94m    \u28c0\u28f4\u28bf\u28bf\u28bf\u2808\u2808\u2801\\e[1;90m  \u2808\u28c9\\e[1;91m\u283f\u283f\\e[1;90m \u28e0\u2807\u28b8\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28f6\u2820 \\e[1;94m \u2808\u2809\u28fb\u28bf\u28b6\u28c0\"\n" +
+                        "echo -e \"\\e[1;94m  \u28a0\u28bc\u28bf\u28bf\u2807\u2808\u2801\\e[1;90m     \u28b8\\e[1;91m\u28bf\\e[1;90m  \u28c0\u28f7\u28b7\u28bf\u28bf\u2808\u2608\u28bf\u28ad\u2809\u28bf\u28ef\u2807\\e[1;94m  \\e[1;94m\u2608\u2608\u2809\u28fb\u28bf\u2807\"\n" +
+                        "echo -e \"\\e[1;94m \u28c0\u28bf\u28bf\u28bf\u2807\\e[1;90m       \u28a0\\e[1;91m\u28be\u28bf\\e[1;90m  \u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u283f \u2608\u28fb \u28bf\u28bf\u28bf\u2803 \\e[1;90m \u2838   \\e[1;94m\u2838\u28b7\u28e4\"\n" +
+                        "echo -e \"\\e[1;94m\u28b6\u28bf\u283f\u2834\u2801\\e[1;90m    \u28c0\u28b0\\e[1;91m\u28b6\\e[1;91m\u28be\\e[1;91m\u28bf\\e[1;91m\u28bf\\e[1;90m    \u28bf\u28bf\u28bf\u2807  \\e[1;90m \u28b8 \u2809\u28bf\u28bf   \u28b0   \\e[1;94m\u2808\u2809\u28b7\u2806\"\n" +
+                        "echo -e \"\\e[1;94m\u2808\u2837 \\e[1;90m      \u28bf\u28be\u28bf\u28bf\u28bf\\e[1;91m\u28bf\u28e4\\e[1;90m   \u2808\u2808\u2808\u2801  \\e[1;90m | \u28b0\u28bf\u28bf   \u2808\u2840   \\e[1;94m  \u2838\u2837\"\n" +
+                        "echo -e \"\\e[1;94m \u28b6 \\e[1;90m      \u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\\e[1;91m\u28bf\u28bf\u28e4\u28e4\\e[1;90m     \u28e4|\u28bf \u28c0\u28bf\u28bf \u28bf   \u28bf    \\e[1;94m \u28b8\u28b7\"\n" +
+                        "echo -e \"\\e[1;94m  \u28b8\u2807\\e[1;90m   \u28c0\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28c1\u28f4\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28f6\u28bf\u28bf    \\e[1;94m  \u28b8\u28f6\"\n" +
+                        "echo -e \"\\e[1;94m  \u28c8\u2801\\e[1;90m  \u28b0\u283f\u280b\u2814\u28b9\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u283f\u28bf \u28b8\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u2800  \\e[1;94m  \u28b0\u28bf\u283f\"\n" +
+                        "echo -e \"\\e[1;94m  \u2808\u28c1\\e[1;90m \u28c0\u28bc  \\e[1;95m \u2808\u2801\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u2807\u2801\u28b6\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28e7  \\e[1;94m  \u28b8\u28bf\"\n" +
+                        "echo -e \"\\e[1;94m   \u28b8\\e[1;90m \u28b8\u2807   \\e[1;95m  \u280b \u28b9\u28bf\u283f\u2808\u28bf\u28bf\u28bf\u28bf\u2807\u28b9\u28bf\u28bf\u28bf\u28bf\u2608      \u28c8\u28fb\u28bf\u2807  \\e[1;94m\u28e0\u28be\u2801\"\n" +
+                        "echo -e \"\\e[1;94m   \u28b8\\e[1;90m\u28be\u2807             \u28bf\u2807\u28e0\u28be\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28e4\u28e0\u28e0\u28e0\u28bf\u28bf\u28bf\u2807 \\e[1;94m\u28b8\u2807\u2834\"\n" +
+                        "echo -e \"\\e[1;94m   \u2838\\e[1;90m\u283f\u2807           \u28e0\u28b6\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u2807 \\e[1;94m\u28be\u28e7\u2800\"\n" +
+                        "echo -e \"\\e[1;94m    \u2838\\e[1;90m\u2838         \u28e0\u28be\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf|/\u2808\u2808\u2808\u2808\u2808\u2808\u2808\u2808\u2808\u2808\\\\\\e[1;94m\u28bc\\e[1;90m\u28bf/\\e[1;94m\u28bc\\e[1;90m\u28bf\u28bf\u28e7\"\n" +
+                        "echo -e \"\\e[1;94m    \u2838\\e[1;90m        \u28c0/\u28b8\u28bf\u28bf\u283f\u28bd\u28bf\u28bf\u28bf\u28bf              \u28f4\u28bf\u28bf\u28bf\u28bf\u28b7\"\n" +
+                        "echo -e \"\\e[1;90m              \u28b8\u28bf\u283f\u2801 \u28bf\u28bf\u28bf\u28bf\u28bf\u28bf               \u28fb\u28bf\u28bf\u28bf\u28bf\u28bf\"\n" +
+                        "echo  \"              \u28b8\u28bf   \u2804\u28bf\u28bf\u28bf\u28bf\u28bf\u28e4              \u28b8\u28bf\u28bf\u28bf\u28bf\u283f\"\n" +
+                        "echo -e \"\\e[1;90m              \u28b8\u283f     \u28bf\u28bf\u28bf\u28bf\u28bf\u28b7\u28e4         \u28e0\u28be\u28bf\u28bf\u28bf\u28bf\u28bf\"\n" +
+                        "echo  \"              \u28b8\u283f     \u2804\u28fb\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28b7\u28e0\u28e0\u28e0\u28e0\u28e0\u28be\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u2807\"\n" +
+                        "echo -e \"\\e[1;90m              \u28b8\u28bf       \u2804\u2809\u28fb\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u283f\u2834\u280b\\e[1;98m \"\n" +
+                        "echo  \"              \u28f9\u28b6         \u2808\u2808\u2808\u2804\u283f\u283f\u283f\u283f\u283f\u280f\u2808\"\n" +
+                        "echo -e \"\\e[1;90m               \u28b8\u28bf\\e[1;98m \"\n" +
+                        "echo  \"                \\|\"\n" +
+                        "echo \"\"\n" +
+                        "echo -e \"\\e[1;95m\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7_{GODKILLER}_\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\"\n" +
+                        "echo -e \"\\e[1;93m MY-IP: { $(curl -s --max-time 4 ifconfig.me 2>/dev/null || wget -qO- --timeout=4 ifconfig.me 2>/dev/null || echo offline) }\\e[0m\"\n" +
+                        "command -v free  >/dev/null 2>&1 && { echo -e \"\\e[1;92m\"; free -h; }\n" +
+                        "echo -e \"\\e[1;91m\"\n" +
+                        "df -h 2>/dev/null | head -6\n" +
                         "echo -e \"\\e[0m\"\n" +
-                        "PS1='\\[\\e[94m\\]\\u2514\\u2500×××××[\\[\\e[97m\\]\\T\\[\\e[94m\\]]§§§§§§\\e[1;94m[\\e[1;92m{C0A†YL}✓\\e[1;94m]\\e[0;94m:::::::[\\e[1;96m\\#\\e[1;92m-wings\\e[1;94m]\\n|\\n\\e[0;94m\\u253f==[\\[\\e[94m\\]\\e[0;95m\\W\\[\\e[94m\\]]\\e[1;93m-species\\[\\e[94m\\]\\e[1;91m\\[\\e[91m\\]§§\\e[1;91m[\\e[1;92m{✓}\\e[1;91m]\\e[0;94m\\n|\\n\\u2514==[\\[\\e[93m\\]≈≈≈≈≈\\e[94m\\]]™[✓]=►\\e[1;91m '\n";
+                        "PS1='\\[\\e[94m\\]\u250c\u2500\u00d7\u00d7\u00d7\u00d7\u00d7[\\[\\e[97m\\]\\T\\[\\e[94m\\]]\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\\e[1;94m[\\e[1;92m{C0A\u2020YL}\u2713\\e[1;94m]\\e[0;94m::::::::[\\e[1;96m\\#\\e[1;92m-wings\\e[1;94m]\\n|\\n\\e[0;94m\u253f==[\\[\\e[94m\\]\\e[0;95m\\W\\[\\e[94m\\]]\\e[1;93m-species\\[\\e[94m\\]\\e[1;91m\\[\\e[91m\\]\u00a7\u00a7\\e[1;91m[\\e[1;92m{\u2713}\\e[1;91m]\\e[0;94m\\n|\\n\u2514==[\\[\\e[93m\\]\u2248\u2248\u2248\u2248\u2248\\e[94m\\]]\u2122[\u2713]=\u25ba\\e[1;91m '\n";
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

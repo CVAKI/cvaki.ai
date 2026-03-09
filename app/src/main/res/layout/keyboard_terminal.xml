@@ -61,20 +61,22 @@
             android:background="#001200">
 
             <TextView
+                android:id="@+id/tv_live_label"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="LIVE"
-                android:textColor="#555555"
+                android:textColor="#444444"
                 android:textSize="8sp"
                 android:letterSpacing="0.2"
                 android:fontFamily="monospace"
                 android:layout_marginEnd="4dp"/>
 
-            <android.widget.Switch
+            <Switch
                 android:id="@+id/switch_live_import"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:showText="false"
+                android:checked="false"
                 android:thumbTint="#444444"
                 android:trackTint="#1A1A1A"
                 android:scaleX="0.85"

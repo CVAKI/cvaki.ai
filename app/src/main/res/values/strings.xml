@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">CVA Keyboard</string>
-    <string name="keyboard_name">CVA Keyboard</string>
+    <!-- ── App core ─────────────────────────────────────────────────────── -->
+    <string name="app_name">CVA</string>
+    <string name="keyboard_name">OpenCva</string>
     <string name="settings_title">CVA Settings</string>
     <string name="api_key_hint">Enter Anthropic API key (sk-ant-…)</string>
     <string name="btn_save">Save</string>
@@ -11,4 +12,76 @@
     <string name="terminal_ready">CVA Terminal v1.0\n$ </string>
     <string name="import_success">Imported to cursor ✓</string>
     <string name="no_api_key">No API key. Open CVA Settings to configure.</string>
+
+    <!-- ── Smart Overlay / Float Bubble ─────────────────────────────────── -->
+    <string name="overlay_ready">CVA ready</string>
+    <string name="overlay_capturing">📷 Capturing screen…</string>
+    <string name="overlay_analyzing">🤖 Analyzing…</string>
+    <string name="overlay_executing">⚡ Executing…</string>
+    <string name="overlay_done">✅ Done</string>
+    <string name="overlay_error">❌ Error</string>
+    <string name="overlay_busy">CVA is busy…</string>
+    <string name="overlay_tap_to_run">Tap ▶ to run</string>
+    <string name="overlay_started">CVA screen agent started</string>
+    <string name="overlay_no_permission">Grant screen capture permission in CVA settings</string>
+    <string name="overlay_no_api_key">⚠ No API key set</string>
+    <string name="overlay_no_screen_perm">⚠ No screen permission</string>
+
+    <!-- ── Screen Capture ────────────────────────────────────────────────── -->
+    <string name="screen_capture_denied">Screen capture denied — CVA needs this to read your screen</string>
+    <string name="screen_capture_ready">Screen capture permission granted ✓</string>
+    <string name="screen_capture_failed">Capture failed</string>
+
+    <!-- ── Accessibility Service ─────────────────────────────────────────── -->
+    <string name="accessibility_service_description">
+        CVA Brain needs Accessibility access to tap buttons, select options,
+        and fill text fields on your behalf — fully under your command.
+    </string>
+    <string name="accessibility_not_available">AccessibilityService not connected. Enable it in Settings → Accessibility → CVA Brain.</string>
+    <string name="accessibility_click_done">Click dispatched ✓</string>
+    <string name="accessibility_type_done">Text injected ✓</string>
+    <string name="accessibility_no_focus">No focused field found for typing</string>
+
+    <!-- ── AI Vision Engine ───────────────────────────────────────────────── -->
+    <string name="vision_error_encode">Failed to encode screenshot</string>
+    <string name="vision_error_parse">Could not parse AI response</string>
+    <string name="vision_error_api">AI Vision API error</string>
+    <string name="vision_error_no_engine">Vision engine not initialised — set API key first</string>
+
+    <!-- ── Action types (shown in bubble status) ─────────────────────────── -->
+    <string name="action_click">Tapping…</string>
+    <string name="action_type">Typing…</string>
+    <string name="action_teleport_type">Moving to field and typing…</string>
+    <string name="action_scroll">Scrolling…</string>
+    <string name="action_wait">Waiting…</string>
+
+    <!-- ── Notification channels ─────────────────────────────────────────── -->
+    <string name="notif_channel_overlay_name">CVA Brain</string>
+    <string name="notif_channel_overlay_desc">CVA overlay service</string>
+    <string name="notif_channel_smart_name">CVA Smart Overlay</string>
+    <string name="notif_channel_smart_desc">AI screen automation running</string>
+    <string name="notif_title_active">CVA Brain active</string>
+    <string name="notif_text_overlay">Tap to open CVA settings</string>
+    <string name="notif_text_smart">AI screen automation running</string>
+
+    <!-- ── Permissions / onboarding ──────────────────────────────────────── -->
+    <string name="perm_overlay_title">Overlay Permission Required</string>
+    <string name="perm_overlay_msg">CVA needs "Display over other apps" to show the floating button.</string>
+    <string name="perm_accessibility_title">Accessibility Permission Required</string>
+    <string name="perm_accessibility_msg">Enable CVA Brain in Accessibility Settings to allow it to tap and type on your behalf.</string>
+    <string name="perm_screen_title">Screen Capture Permission Required</string>
+    <string name="perm_screen_msg">CVA needs to read your screen to understand what\'s on it. Nothing is recorded or stored.</string>
+    <string name="btn_open_settings">Open Settings</string>
+    <string name="btn_grant">Grant</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_run">▶ Run</string>
+    <string name="btn_close">✕</string>
+
+    <!-- ── BusyBox / Terminal bootstrap ──────────────────────────────────── -->
+    <string name="busybox_native">BusyBox [nativeLib] ✓</string>
+    <string name="busybox_downloaded">BusyBox [downloaded] ✓</string>
+    <string name="busybox_downloading">Downloading BusyBox…</string>
+    <string name="busybox_error_small">Download too small — retrying</string>
+    <string name="busybox_linker_warn">Android 10+ blocks direct exec from filesDir. Using linker64 workaround.</string>
+    <string name="terminal_v">CVA Terminal v1.0\n$ </string>
 </resources>

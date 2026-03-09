@@ -77,6 +77,9 @@ public class KeyboardService extends InputMethodService {
     private boolean isBrainNumSymMode = false;
     private boolean isBrainSymPage2   = false;
 
+    /** TRUE = Screen-Agent mode ON — brain can see the screen and act autonomously */
+    private boolean brainSwitchOn = false;
+
     // Background executor
     private final ExecutorService exec = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -119,8 +122,19 @@ public class KeyboardService extends InputMethodService {
         }
         brainAgent = new BrainAgent(provider, activeKey, this);
         brainAgent.setTerminalManager(terminalManager);
+        // agentCallback: while running → update the status ticker only.
+        // Final answer (isRunning=false) → add the reply bubble exactly ONCE here.
+        // sendBrainMsg() adds the user bubble + thinking bubble only.
         brainAgent.setAgentCallback((msg, isRunning, scrollToEnd) -> ui.post(() -> {
-            if (currentSection == SEC_BRAIN) showAgentStatus(msg);
+            if (currentSection != SEC_BRAIN) return;
+            updateAgentStatusTicker(msg, isRunning);
+            if (!isRunning && msg != null && !msg.isEmpty()) {
+                // Final answer: store for import button and add exactly one bubble
+                lastCvaReply = msg;
+                addBubble(msg, false);
+                if (svBrainOut != null)
+                    svBrainOut.post(() -> svBrainOut.fullScroll(ScrollView.FOCUS_DOWN));
+            }
         }));
 
         showSection(SEC_NORMAL);
@@ -748,28 +762,28 @@ public class KeyboardService extends InputMethodService {
         });
 
         // Add welcome bubble
-        addBubble("🦊 CVA Brain ready. I can run device commands automatically — just ask!", false);
+        addBubble("🦊 CVA Brain ready. Tap 🧠 to toggle Screen-Agent ON/OFF — when ON I can see & control your screen!", false);
     }
 
     private static final String[][] BRAIN_ROWS = {
             {"q","w","e","r","t","y","u","i","o","p"},
             {"a","s","d","f","g","h","j","k","l"},
             {"SHF","z","x","c","v","b","n","m","DEL"},
-            {"?123"," ","SEND"}
+            {"?123"," ","PARASITE","SEND"}
     };
 
     private static final String[][] BRAIN_NUM_SYM_1 = {
             {"1","2","3","4","5","6","7","8","9","0"},
             {"!","@","#","$","%","^","&","*","(",")",},
             {"=\\<","-","_","+","=","[","]","{","}","DEL"},
-            {"ABC","SYM2"," ","SEND"}
+            {"ABC","SYM2"," ","PARASITE","SEND"}
     };
 
     private static final String[][] BRAIN_NUM_SYM_2 = {
             {"~","`","\\","|","/","<",">","?",":",";"},
             {"'","\"",",",".","…","•","€","£","¥","°"},
             {"©","®","™","←","→","↑","↓","×","÷","DEL"},
-            {"ABC","SYM1"," ","SEND"}
+            {"ABC","SYM1"," ","PARASITE","SEND"}
     };
 
     private void buildBrainKeyboard() {
@@ -786,10 +800,38 @@ public class KeyboardService extends InputMethodService {
             rl.setPadding(dp(3),dp(2),dp(3),dp(2));
             rl.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
             for (String k : row) {
+                // ── PARASITE key: ImageButton with res/drawable/parasite.png ──────────────
+                if (k.equals("PARASITE")) {
+                    android.widget.ImageButton ib = new android.widget.ImageButton(this);
+                    // weight 1.5 — same as modifier keys, keeps row balanced
+                    LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(54), 1.0f);
+                    p.setMargins(4, 3, 4, 3);
+                    ib.setLayoutParams(p);
+                    // tight padding so image fills the key face
+                    ib.setPadding(dp(3), dp(3), dp(3), dp(3));
+                    ib.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+
+                    ib.setImageResource(R.drawable.parasite);
+                    // OFF = orange tint  |  ON = green glow
+                    ib.setColorFilter(
+                            brainSwitchOn
+                                    ? android.graphics.Color.parseColor("#00FF44")
+                                    : android.graphics.Color.parseColor("#FF6A1A"),
+                            android.graphics.PorterDuff.Mode.SRC_ATOP
+                    );
+                    // Background stays the same default key colour regardless of state
+                    ib.setBackground(roundedKey(keyColor("PARASITE")));
+                    ib.setTag("parasite_btn");
+                    ib.setOnClickListener(v -> handleBrainKey("PARASITE"));
+                    rl.addView(ib);
+                    continue;
+                }
+
+                // ── All other keys ────────────────────────────────────────────────────────
                 Button b = new Button(this);
                 float w = switch (k) {
-                    case " " -> 3f;
-                    case "SEND" -> 2f;
+                    case " " -> 3.0f;
+                    case "SEND" -> 1.5f;
                     case "SHF","DEL","?123","ABC","SYM1","SYM2","=\\<" -> 1.5f;
                     default -> 1f;
                 };
@@ -841,6 +883,7 @@ public class KeyboardService extends InputMethodService {
             case "ABC"  -> { isBrainNumSymMode = false; isBrainSymPage2 = false; buildBrainKeyboard(); }
             case "SYM2","=\\<" -> { isBrainNumSymMode = true; isBrainSymPage2 = true;  buildBrainKeyboard(); }
             case "SYM1" -> { isBrainNumSymMode = true;  isBrainSymPage2 = false; buildBrainKeyboard(); }
+            case "PARASITE" -> toggleBrainSwitch();
             default -> {
                 brainBuf.append(isShiftOn && !isBrainNumSymMode ? key.toUpperCase() : key);
                 updateBrainInput();
@@ -854,27 +897,78 @@ public class KeyboardService extends InputMethodService {
         if (inp != null) inp.setText("> " + brainBuf + "█");
     }
 
+    /**
+     * Toggle the Brain Screen-Agent switch ON/OFF.
+     *
+     * ON  → launches ScreenCapturePermissionActivity which starts SmartOverlayService.
+     *        The overlay service reads the screen and executes the task autonomously.
+     *        If there is text in the input bar it is used as the first task.
+     *
+     * OFF → stops SmartOverlayService and refreshes the keyboard button colours.
+     */
+    private void toggleBrainSwitch() {
+        brainSwitchOn = !brainSwitchOn;
+        buildBrainKeyboard();   // redraw so button colour flips immediately
+
+        if (brainSwitchOn) {
+            // ── Determine the task (use typed text or fallback) ──────────────
+            String task = brainBuf.toString().trim();
+            if (task.isEmpty()) task = "Analyze the screen and complete the current task";
+
+            // Reload API key + provider from prefs
+            android.content.SharedPreferences prefs =
+                    getSharedPreferences("cva_prefs", android.content.Context.MODE_PRIVATE);
+            String provider = prefs.getString("provider", BrainAgent.PROVIDER_ANTHROPIC);
+            String apiKey;
+            switch (provider) {
+                case BrainAgent.PROVIDER_GEMINI:     apiKey = prefs.getString("key_gemini",     ""); break;
+                case BrainAgent.PROVIDER_OPENROUTER: apiKey = prefs.getString("key_openrouter", ""); break;
+                default:                             apiKey = prefs.getString("key_anthropic",  prefs.getString("api_key", "")); break;
+            }
+
+            // Show feedback bubble
+            addBubble("[🧠]::Parasite deamon On…", false);
+
+            // Launch the screen-capture permission activity (starts SmartOverlayService)
+            android.content.Intent intent = new android.content.Intent(
+                    this, ScreenCapturePermissionActivity.class);
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.putExtra("task",     task);
+            intent.putExtra("apiKey",   apiKey);
+            intent.putExtra("provider", provider);
+            startActivity(intent);
+
+        } else {
+            // ── Stop the overlay service ─────────────────────────────────────
+            stopService(new android.content.Intent(this, SmartOverlayService.class));
+            addBubble("[🧠]:: Parasite Killed..", false);
+        }
+    }
+
     private void sendBrainMsg() {
         String msg = brainBuf.toString().trim();
         if (msg.isEmpty()) return;
-        addBubble(msg, true);   // user bubble (right)
+        addBubble(msg, true);   // ← user bubble (right-aligned orange)
         brainBuf.setLength(0);
         updateBrainInput();
-        android.view.View thinking = addBubble("…", false);  // thinking bubble
         svBrainOut.post(() -> svBrainOut.fullScroll(ScrollView.FOCUS_DOWN));
 
-        exec.execute(() -> {
-            String resp = brainAgent.chat(msg);
-            lastCvaReply = resp;
-            ui.post(() -> {
-                if (tvBrainOut != null) tvBrainOut.removeView(thinking);
-                addBubble(resp, false);  // CVA bubble (left)
-                svBrainOut.post(() -> svBrainOut.fullScroll(ScrollView.FOCUS_DOWN));
-            });
-        });
+        // ── If Screen-Agent is ON, also update the overlay task ────────────────
+        if (brainSwitchOn) {
+            android.content.Intent update = new android.content.Intent(
+                    this, SmartOverlayService.class);
+            update.putExtra("task", msg);
+            startService(update);  // onStartCommand just calls setTask() for re-sends
+        }
+
+        // brainAgent.chat() fires agentCallback on every step.
+        // The final bubble is added by agentCallback (isRunning=false) above.
+        // chat() returns null when agentCallback is set — do NOT call addBubble(resp).
+        exec.execute(() -> brainAgent.chat(msg));
     }
 
-    /** Add a chat bubble. isUser=true → right/orange. isUser=false → left/dark. */
+    /** Add a chat bubble. isUser=true → right/orange. isUser=false → left/dark.
+     *  Long-press any bubble → copies its text to clipboard. */
     private android.view.View addBubble(String text, boolean isUser) {
         android.widget.FrameLayout wrapper = new android.widget.FrameLayout(this);
         LinearLayout.LayoutParams wp = new LinearLayout.LayoutParams(
@@ -918,6 +1012,16 @@ public class KeyboardService extends InputMethodService {
         }
         tv.setBackground(bubble);
         tv.setLayoutParams(tp);
+
+        // ── Long-press → copy bubble text to clipboard ────────────────────────
+        tv.setOnLongClickListener(v -> {
+            ClipboardManager cm = (ClipboardManager)
+                    getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(ClipData.newPlainText("cva_bubble", text));
+            Toast.makeText(this, "Copied ✓", Toast.LENGTH_SHORT).show();
+            return true;
+        });
+
         wrapper.addView(tv);
         tvBrainOut.addView(wrapper);
         return wrapper;
@@ -968,18 +1072,35 @@ public class KeyboardService extends InputMethodService {
     }
 
     // ── Agent status ticker ───────────────────────────────────────────────────
-    private void showAgentStatus(String msg) {
+
+    /**
+     * Updates the scrolling status ticker at the top of the brain section.
+     * NEVER adds a bubble — bubble management is handled exclusively by
+     * sendBrainMsg() (user bubble) and BrainAgent.agentCallback final step.
+     *
+     * @param msg       Status text to show in the ticker.
+     * @param isRunning TRUE = agent busy (show ticker); FALSE = done (hide ticker).
+     */
+    private void updateAgentStatusTicker(String msg, boolean isRunning) {
         if (sectionBrain == null) return;
         android.widget.TextView tv = sectionBrain.findViewById(R.id.tv_agent_status);
         if (tv == null) return;
-        tv.setVisibility(View.VISIBLE);
-        tv.setText(msg);
-        tv.setSelected(true); // enable marquee
-        // Auto-hide after 8 seconds of no updates
-        tv.removeCallbacks(null);
-        tv.postDelayed(() -> tv.setVisibility(View.GONE), 8000);
-        // Also add as a small info bubble
-        addBubble(msg, false);
+        if (isRunning) {
+            tv.setVisibility(View.VISIBLE);
+            tv.setText(msg);
+            tv.setSelected(true); // enable marquee scroll
+            tv.removeCallbacks(null);
+            // Auto-hide 4 s after the last running update
+            tv.postDelayed(() -> tv.setVisibility(View.GONE), 4000);
+        } else {
+            // Agent finished — hide the ticker immediately
+            tv.setVisibility(View.GONE);
+        }
+    }
+
+    /** @deprecated use updateAgentStatusTicker — kept so any existing XML/reflection refs compile */
+    private void showAgentStatus(String msg) {
+        updateAgentStatusTicker(msg, true);
     }
 
     private int dp(int dp) {

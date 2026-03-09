@@ -252,12 +252,35 @@ public class TerminalManager {
                 } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             });
 
-            // Source .bashrc once shell is alive
+            // ── Print banner directly from Java (works on any shell) ──────────
+            // ANSI codes are sent as raw bytes to the terminal view — no shell parsing needed
+            mainHandler.postDelayed(() -> callback.onOutput(
+                    "\033[1;96m\n" +
+                            "========================================================\n" +
+                            "\033[1;96m ██████╗\033[1;91m           _____   __          .____  \n" +
+                            "\033[1;96m██╔════╝\033[1;91m   ____   /  _  \/  | __._.| \033[1;92mc\033[1;91m  |  \n" +
+                            "\033[1;96m██║     \033[1;91m  /  _ \ /  /_\\  \\   __|   |  || \033[1;92mv\033[1;91m  |   \n" +
+                            "\033[1;96m██║     \033[1;91m ( \033[1;92m (☣)\033[1;91m )    |    \\  |  \\___  || \033[1;92ma\033[1;91m  |___ \n" +
+                            "\033[1;96m╚██████╗\033[1;91m  \/\\|__  /|  / ____||  ______\\ \n" +
+                            "\033[1;96m ╚═════╝\033[1;91m                \/      \/      \/\033[1;92m powered by\n" +
+                            "\033[1;96m                                                     CVAKI\n" +
+                            "\033[1;95m§§§§§§§§§§§§§§§§§§§§§§§_{GODKILLER}_§§§§§§§§§§§§§§§§§§§§§§§\n" +
+                            "\033[0m\n"
+            ), 300);
+
+            // ── Source .bashrc / set PS1 once shell is alive ──────────────────
             mainHandler.postDelayed(() -> {
                 if (process != null && process.isAlive()) {
                     File bashrc = new File(ctx.getFilesDir(), ".bashrc");
-                    if (bashrc.exists()) sendRaw(". " + bashrc.getAbsolutePath() + "\n");
-                    else                 sendRaw("PS1='$ '\n");
+                    if (bashrc.exists()) {
+                        // Source only the PS1 + alias block, skip the banner/echo lines
+                        // (banner already printed above from Java)
+                        sendRaw("export TERM=xterm-256color\n");
+                        sendRaw("export PS1='\[\e[94m\]┌─×××××[\[\e[97m\]\T\[\e[94m\]]§§§§§§\e[1;94m[\e[1;92m{C0A†YL}✓\e[1;94m]\e[0;94m::::::::[\e[1;96m\#\e[1;92m-wings\e[1;94m]\n|\n\e[0;94m┿==[\[\e[94m\]\e[0;95m\W\[\e[94m\]]\e[1;93m-species\[\e[94m\]\e[1;91m\[\e[91m\]§§\e[1;91m[\e[1;92m{✓}\e[1;91m]\e[0;94m\n|\n└==[\[\e[93m\]≈≈≈≈≈\e[94m\]]™[✓]=►\e[1;91m '\n");
+                        sendRaw("alias ll='ls -alF'\nalias la='ls -A'\nalias l='ls -CF'\nalias cls='clear'\n");
+                    } else {
+                        sendRaw("export PS1='\[\e[92m\]CVA\[\e[0m\]$ '\n");
+                    }
                 }
             }, 600);
 

@@ -1,29 +1,115 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    res/layout/overlay_bubble.xml
+    Used by OverlayService.
+
+    IMPORTANT: Do NOT use ?attr/ or ?android:attr/ references anywhere in this
+    file. This layout is inflated from a Service which has no Activity theme
+    context — ?attr/ resolution will throw UnsupportedOperationException and
+    crash with InflateException. Use explicit colors only.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:background="#CC1A0040"
-    android:paddingStart="8dp"
-    android:paddingEnd="4dp"
-    android:paddingTop="4dp"
-    android:paddingBottom="4dp">
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:background="@android:color/transparent">
 
-    <TextView
-        android:id="@+id/tv_overlay_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="🧠 CVA active"
-        android:textColor="#CE93D8"
-        android:textSize="12sp" />
-
-    <ImageButton
-        android:id="@+id/btn_overlay_close"
-        android:layout_width="24dp"
-        android:layout_height="24dp"
-        android:src="@android:drawable/ic_menu_close_clear_cancel"
+    <!-- ── Floating logo — always visible, no background ── -->
+    <ImageView
+        android:id="@+id/iv_overlay_logo"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:src="@drawable/parasite"
+        android:scaleType="fitCenter"
         android:background="@android:color/transparent"
-        android:layout_marginStart="6dp"
-        android:contentDescription="Close overlay" />
+        android:contentDescription="CVA Logo"
+        android:alpha="0.92" />
+
+    <!-- ── Detail panel — hidden until logo is tapped ── -->
+    <LinearLayout
+        android:id="@+id/layout_detail_panel"
+        android:layout_width="200dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#E61A0040"
+        android:padding="12dp"
+        android:layout_marginTop="6dp"
+        android:visibility="gone">
+
+        <!-- Status label -->
+        <TextView
+            android:id="@+id/tv_overlay_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CVA active"
+            android:textColor="#CE93D8"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:gravity="center" />
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#44CE93D8"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Open Brain -->
+        <TextView
+            android:id="@+id/btn_open_brain"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🧠  Open Brain"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:background="@android:color/transparent" />
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#22FFFFFF" />
+
+        <!-- Settings -->
+        <TextView
+            android:id="@+id/btn_settings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⚙️  Settings"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:background="@android:color/transparent" />
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#22FFFFFF" />
+
+        <!-- Close overlay -->
+        <TextView
+            android:id="@+id/btn_overlay_close"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="✖  Close overlay"
+            android:textColor="#FF6B6B"
+            android:textSize="13sp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:background="@android:color/transparent" />
+
+    </LinearLayout>
 
 </LinearLayout>

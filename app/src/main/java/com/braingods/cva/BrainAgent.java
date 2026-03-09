@@ -51,7 +51,7 @@ public class BrainAgent {
             "llama3-70b-8192",
             "llama3-8b-8192",
             "gemma2-9b-it",
-            "mixtral-8x7b-32768",
+            "llama-3.1-8b-instant",
     };
 
     private static final String[] GEMINI_MODELS = {
@@ -110,6 +110,24 @@ public class BrainAgent {
     private TerminalManager        terminalManager;
     private AgentCallback          agentCallback;
     private LiveModeController     liveModeController;
+
+    /**
+     * Controls whether the live terminal panel is shown during command execution.
+     * Driven by the switch_live_import toggle in keyboard_terminal.xml.
+     * DEFAULT = false (live panel hidden until user turns it on).
+     */
+    private volatile boolean liveEnabled = false;
+
+    /** Called by the switch_live_import toggle. Thread-safe. */
+    public void setLiveEnabled(boolean enabled) {
+        this.liveEnabled = enabled;
+        // If turning OFF while a panel is open, close it immediately
+        if (!enabled && liveModeController != null) {
+            liveModeController.setLiveMode(false);
+        }
+    }
+
+    public boolean isLiveEnabled() { return liveEnabled; }
 
     // ═════════════════════════════════════════════════════════════════════════
     // Public interfaces
@@ -211,17 +229,17 @@ public class BrainAgent {
 
                 loops++;
 
-                // ── STEP 1: open live terminal panel ──────────────────────────
+                // ── STEP 1: open live terminal panel (only if switch is ON) ───
                 step("⌨ Typing command…", true);
-                setLiveMode(true);
+                if (liveEnabled) setLiveMode(true);
 
                 // ── STEP 2: type command letter-by-letter ─────────────────────
                 step("⌨ " + cmd, true);
-                typeLive(cmd);
+                if (liveEnabled) typeLive(cmd);
 
                 // ── STEP 3: press Enter ───────────────────────────────────────
                 step("▶ Executing…", true);
-                submitLive();
+                if (liveEnabled) submitLive();
 
                 // ── STEP 4: capture output via TerminalManager ────────────────
                 String output = runShellCommand(cmd);
@@ -233,9 +251,11 @@ public class BrainAgent {
                         && !output.toLowerCase().contains("exception")
                         && !output.startsWith("[Error");
 
-                // Show coloured result in live panel
-                showLiveResult(output, success);
-                sleep(600);  // let user read the result before panel closes
+                // Show coloured result in live panel (only if switch is ON)
+                if (liveEnabled) {
+                    showLiveResult(output, success);
+                    sleep(600);  // let user read the result before panel closes
+                }
 
                 // Update thinking bubble with coloured status
                 if (success) {
@@ -245,7 +265,7 @@ public class BrainAgent {
                 }
 
                 // ── STEP 5: close live terminal panel ─────────────────────────
-                setLiveMode(false);
+                if (liveEnabled) setLiveMode(false);
 
                 // ── STEP 6: feed output back to AI ────────────────────────────
                 step("⚙ CVA analysing output…", true);

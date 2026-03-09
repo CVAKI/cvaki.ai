@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    res/layout/overlay_smart_bubble.xml
+    Used by SmartOverlayService.
+
+    Layout:
+      [parasite logo]  [chat bubble panel →→→]
+
+    Tap logo  → panel appears to the RIGHT + agent auto-runs.
+    Retap     → panel collapses. No × button needed.
+    Long-press any bubble → copy text to clipboard.
+
+    NO ?attr/ — inflated from a Service (no Activity theme context).
+    NO close/play buttons.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="top"
+    android:background="@android:color/transparent">
+
+    <!-- ── Parasite logo — always floating, always visible ── -->
+    <ImageView
+        android:id="@+id/iv_smart_logo"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:src="@drawable/parasite"
+        android:scaleType="fitCenter"
+        android:background="@android:color/transparent"
+        android:contentDescription="CVA Agent"
+        android:alpha="0.93" />
+
+    <!-- ── Chat bubble panel — hidden until logo tapped ── -->
+    <LinearLayout
+        android:id="@+id/layout_smart_panel"
+        android:layout_width="260dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginStart="6dp"
+        android:background="@android:color/transparent"
+        android:visibility="gone">
+
+        <!-- Status pill at top -->
+        <TextView
+            android:id="@+id/tv_smart_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="● parasite active"
+            android:textColor="#FF00FF41"
+            android:textSize="9sp"
+            android:fontFamily="monospace"
+            android:background="#CC000000"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
+            android:layout_marginBottom="4dp"
+            android:layout_marginStart="4dp" />
+
+        <!-- Scrollable chat bubble stream -->
+        <ScrollView
+            android:id="@+id/sv_terminal"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:scrollbars="none"
+            android:background="@android:color/transparent"
+            android:fillViewport="false">
+
+            <!-- Bubble container — populated programmatically -->
+            <LinearLayout
+                android:id="@+id/ll_bubble_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="2dp"
+                android:paddingEnd="2dp"
+                android:paddingBottom="4dp"
+                android:clipToPadding="false" />
+
+        </ScrollView>
+
+        <!-- Current task footer pill -->
+        <TextView
+            android:id="@+id/tv_smart_task"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#FFAAAAFF"
+            android:textSize="9sp"
+            android:fontFamily="monospace"
+            android:background="#CC000000"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginStart="4dp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+</LinearLayout>

@@ -257,23 +257,27 @@ public class AgentChatView extends LinearLayout {
     }
 
     /**
-     * Wire this directly to the {@code switch_live_import} toggle in your Service/Activity:
+     * Called by the switch_live_import toggle in keyboard_terminal.xml.
      *
+     * Wire it in your Service after inflating the terminal section:
      * <pre>
-     *   Switch liveSwitch = view.findViewById(R.id.switch_live_import);
-     *   liveSwitch.setOnCheckedChangeListener((btn, isChecked) ->
-     *       chatView.setLiveEnabled(isChecked));
+     *   Switch sw = termView.findViewById(R.id.switch_live_import);
+     *   sw.setOnCheckedChangeListener((btn, on) -> {
+     *       brainAgent.setLiveEnabled(on);          // controls live panel in BrainAgent
+     *       chatView.setLiveEnabled(on);            // syncs the visual panel state
+     *       // Update switch colours to give clear ON/OFF feedback
+     *       btn.setThumbTintList(android.content.res.ColorStateList.valueOf(
+     *           on ? 0xFF00FF41 : 0xFF444444));
+     *       btn.setTrackTintList(android.content.res.ColorStateList.valueOf(
+     *           on ? 0xFF003300 : 0xFF1A1A1A));
+     *   });
      * </pre>
      *
-     * When ON  — the live terminal panel opens and BrainAgent will type commands
-     *            into it character-by-character before executing them.
-     * When OFF — the panel is hidden; commands still run silently in the background.
-     *
-     * This does NOT start/stop the shell process itself (TerminalManager keeps
-     * running either way).  It only controls the visual live-typing panel.
+     * When ON  — BrainAgent will open the live terminal panel and type commands
+     *            character-by-character so the user can watch.
+     * When OFF — commands run silently in the background; no panel shown.
      */
     public void setLiveEnabled(boolean enabled) {
-        // Delegate to the LiveModeController that is already built into this view
         buildLiveModeController().setLiveMode(enabled);
     }
 

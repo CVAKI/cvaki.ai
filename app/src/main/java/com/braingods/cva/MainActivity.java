@@ -30,7 +30,8 @@ import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final int REQ_PERMISSIONS = 100;
+    private static final int REQ_PERMISSIONS        = 100;
+    private static final int REQUEST_OVERLAY_PERM   = 101;  // ← NEW: overlay permission request code
 
     // ── Views ─────────────────────────────────────────────────────────────────
     private EditText    etKeyAnthropic, etKeyGemini, etKeyOpenRouter, etKeyGroq;
@@ -38,6 +39,9 @@ public class MainActivity extends AppCompatActivity {
     private RadioButton rbAnthropic, rbGemini, rbOpenRouter, rbGroq;
     private TextView    tvStatus;
     private View        viewStatusDot;
+
+    // ── Smart Agent task input ────────────────────────────────────────────────
+    private EditText etAgentTask;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -56,6 +60,7 @@ public class MainActivity extends AppCompatActivity {
         rbGemini        = findViewById(R.id.rb_gemini);
         rbOpenRouter    = findViewById(R.id.rb_openrouter);
         rbGroq          = findViewById(R.id.rb_groq);
+        etAgentTask     = findViewById(R.id.et_agent_task);
 
         // ── Load prefs ────────────────────────────────────────────────────────
         SharedPreferences prefs = getSharedPreferences("cva_prefs", Context.MODE_PRIVATE);
@@ -75,12 +80,20 @@ public class MainActivity extends AppCompatActivity {
         radioProvider.setOnCheckedChangeListener((g, id) -> highlightActiveKey());
         highlightActiveKey();
 
+        // ── Handle open_settings extra from OverlayService ───────────────────
+        if (getIntent() != null && getIntent().getBooleanExtra("open_settings", false)) {
+            // Scroll to / highlight the settings section if needed
+            View section = findViewById(R.id.section_provider);
+            if (section != null) section.requestFocus();
+        }
+
         // ── Entrance animations ───────────────────────────────────────────────
         int[] sectionIds = {
                 R.id.section_keyboard,
                 R.id.section_provider,
                 R.id.section_permissions,
                 R.id.section_overlay,
+                R.id.section_agent,
                 R.id.section_memory
         };
         for (int i = 0; i < sectionIds.length; i++) {
@@ -139,8 +152,11 @@ public class MainActivity extends AppCompatActivity {
         btnOverlay.setOnClickListener(v -> {
             animPress(v);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:" + getPackageName())));
+                startActivityForResult(                                    // ← use startActivityForResult
+                        new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:" + getPackageName())),
+                        REQUEST_OVERLAY_PERM
+                );
             } else {
                 Toast.makeText(this, "Overlay permission already granted ✓", Toast.LENGTH_SHORT).show();
             }
@@ -156,12 +172,30 @@ public class MainActivity extends AppCompatActivity {
         Button btnToggleOverlay = findViewById(R.id.btn_toggle_overlay);
         btnToggleOverlay.setOnClickListener(v -> {
             animPress(v);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                Toast.makeText(this, "Grant overlay permission first", Toast.LENGTH_SHORT).show();
+            startOverlayIfPermitted();   // ← safe launch with permission check
+        });
+
+        // ── Smart Agent launch ────────────────────────────────────────────────
+        Button btnLaunchAgent = findViewById(R.id.btn_launch_agent);
+        btnLaunchAgent.setOnClickListener(v -> {
+            animPress(v);
+            launchSmartAgent(prefs);
+        });
+
+        // Update task intent when already running (no permission re-request)
+        Button btnUpdateTask = findViewById(R.id.btn_update_task);
+        btnUpdateTask.setOnClickListener(v -> {
+            animPress(v);
+            String task = etAgentTask != null
+                    ? etAgentTask.getText().toString().trim() : "";
+            if (task.isEmpty()) {
+                Toast.makeText(this, "Enter a task first", Toast.LENGTH_SHORT).show();
                 return;
             }
-            startService(new Intent(this, OverlayService.class));
-            Toast.makeText(this, "CVA overlay started 🦊", Toast.LENGTH_SHORT).show();
+            Intent i = new Intent(this, SmartOverlayService.class);
+            i.putExtra("task", task);
+            startService(i);
+            Toast.makeText(this, "Task updated ✓", Toast.LENGTH_SHORT).show();
         });
 
         // ── Memory buttons ────────────────────────────────────────────────────
@@ -186,6 +220,94 @@ public class MainActivity extends AppCompatActivity {
         });
 
         updateStatus();
+    }
+
+    // ── Overlay: safe start with permission check ─────────────────────────────
+
+    /**
+     * Checks SYSTEM_ALERT_WINDOW before starting OverlayService.
+     * If not granted → opens system settings and waits for result.
+     * If granted     → starts the service immediately.
+     *
+     * This prevents the AppOps "Bad call uid -1" SecurityException.
+     */
+    private void startOverlayIfPermitted() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && !Settings.canDrawOverlays(this)) {
+            Toast.makeText(this,
+                    "Please allow 'Display over other apps' then tap Start again",
+                    Toast.LENGTH_LONG).show();
+            startActivityForResult(
+                    new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:" + getPackageName())),
+                    REQUEST_OVERLAY_PERM
+            );
+        } else {
+            startService(new Intent(this, OverlayService.class));
+            Toast.makeText(this, "CVA overlay started 🦊", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * Called when the user returns from the overlay permission settings screen.
+     * If permission was granted, start the overlay service automatically.
+     */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_OVERLAY_PERM) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                    && Settings.canDrawOverlays(this)) {
+                // Permission just granted — safe to start now
+                startService(new Intent(this, OverlayService.class));
+                Toast.makeText(this, "CVA overlay started 🦊", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this,
+                        "Overlay permission denied — cannot show floating logo",
+                        Toast.LENGTH_LONG).show();
+            }
+            updateStatus();
+        }
+    }
+
+    // ── Smart Agent launcher ──────────────────────────────────────────────────
+
+    private void launchSmartAgent(SharedPreferences prefs) {
+        // 1. Check overlay permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Grant 'Display over other apps' permission first", Toast.LENGTH_LONG).show();
+            startActivityForResult(
+                    new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:" + getPackageName())),
+                    REQUEST_OVERLAY_PERM
+            );
+            return;
+        }
+
+        // 2. Check API key
+        String apiKey = prefs.getString("api_key", "").trim();
+        if (apiKey.isEmpty()) {
+            Toast.makeText(this, "Save an API key first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // 3. Get task text (use default if empty)
+        String task = (etAgentTask != null && etAgentTask.getText().length() > 0)
+                ? etAgentTask.getText().toString().trim()
+                : "Analyze the screen and help me complete the current task";
+
+        // 4. Get provider
+        String provider = prefs.getString("provider", BrainAgent.PROVIDER_ANTHROPIC);
+
+        // 5. Launch — ScreenCapturePermissionActivity handles the MediaProjection dialog
+        Intent i = new Intent(this, ScreenCapturePermissionActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        i.putExtra("task",     task);
+        i.putExtra("apiKey",   apiKey);
+        i.putExtra("provider", provider);
+        startActivity(i);
+
+        setStatus("🤖 CVA Agent launching…", true);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -261,7 +383,7 @@ public class MainActivity extends AppCompatActivity {
                 == PackageManager.PERMISSION_GRANTED;
         boolean allGood    = hasOverlay && hasCamera && hasAudio
                 && !prefs.getString("api_key", "").isEmpty();
-        setStatus(allGood ? "READY" : "SETUP REQUIRED", false);
+        setStatus(allGood ? "✅ READY" : "⚠ SETUP REQUIRED", false);
     }
 
     // ── Permissions ───────────────────────────────────────────────────────────
