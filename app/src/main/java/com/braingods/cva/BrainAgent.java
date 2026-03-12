@@ -20,30 +20,37 @@ import java.util.concurrent.TimeUnit;
 /**
  * CVA Brain – Anthropic, Google Gemini, OpenRouter, Groq.
  *
- * NEW FEATURES:
- *  1. LIVE MODE  — before executing any shell command the agent opens the live
- *     terminal panel, types the command letter-by-letter so the user can watch,
- *     submits it, captures output, then closes the panel automatically.
- *  2. BLINKING LOGO — AgentCallback carries isRunning + scrollToEnd flags so
- *     the UI can blink the CVA logo badge while the agent is busy and stop it
- *     when the final answer arrives.
- *  3. AUTO-SCROLL — every step fires scrollToEnd=true so AgentChatView always
- *     jumps to the newest bubble.
+ * ARCHITECTURE — Blind-man + Guide-dog:
+ *   CVA Brain is the "blind man": intelligent but cannot see the screen.
+ *   It tries to accomplish tasks via shell commands (terminal).
+ *
+ *   When terminal commands fail {@value BRAIN_MAX_FAILS} times in a row,
+ *   the Brain escalates to the "guide dog" (SmartOverlayService / Parasite)
+ *   via the {@link ParasiteEscalation} callback.
+ *
+ * NEW APIs:
+ *   - {@link #chatOnce(String)}        Single AI call without the agentic loop.
+ *                                      Used by TaskAllocationActivity for task breakdown.
+ *   - {@link #setParasiteEscalation}   Register the escalation handler.
+ *   - {@link ParasiteEscalation}       Callback fired after BRAIN_MAX_FAILS failures.
  */
 public class BrainAgent {
 
     private static final String TAG = "BrainAgent";
 
+    // ── Provider constants ────────────────────────────────────────────────────
     public static final String PROVIDER_ANTHROPIC  = "anthropic";
     public static final String PROVIDER_GEMINI     = "gemini";
     public static final String PROVIDER_OPENROUTER = "openrouter";
     public static final String PROVIDER_GROQ       = "groq";
 
+    // ── Endpoint URLs ─────────────────────────────────────────────────────────
     private static final String URL_ANTHROPIC   = "https://api.anthropic.com/v1/messages";
-    private static final String URL_GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models/";
+    private static final String URL_GEMINI_BASE = "https://generativelanguage.googleapis.com/v1/models/";
     private static final String URL_GROQ        = "https://api.groq.com/openai/v1/chat/completions";
     private static final String URL_OPENROUTER  = "https://openrouter.ai/api/v1/chat/completions";
 
+    // ── Models ────────────────────────────────────────────────────────────────
     private static final String MODEL_ANTHROPIC = "claude-haiku-4-5-20251001";
 
     private static final String[] GROQ_MODELS = {
@@ -55,10 +62,9 @@ public class BrainAgent {
     };
 
     private static final String[] GEMINI_MODELS = {
-            "gemini-2.0-flash-lite",
-            "gemini-1.5-flash-8b",
-            "gemini-1.5-flash",
+            "gemini-2.5-flash",
             "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
     };
 
     private static final String[] FREE_MODELS = {
@@ -70,35 +76,49 @@ public class BrainAgent {
             "deepseek/deepseek-r1:free",
     };
 
+    // ── Tuning constants ──────────────────────────────────────────────────────
     private static final int MAX_TOKENS      = 1024;
     private static final int MAX_LOOPS       = 6;
-    /** Milliseconds between each character typed in live mode */
     private static final int LIVE_CHAR_DELAY = 18;
+
+    /**
+     * How many consecutive terminal failures before the Brain gives up and
+     * asks the Parasite (vision agent) to take over.
+     */
+    private static final int BRAIN_MAX_FAILS = 3;
+
+    // ── Marker returned to callers when escalation fires ──────────────────────
+    public static final String ESCALATED_MARKER = "[ESCALATED_TO_PARASITE]";
 
     // ── System prompt ─────────────────────────────────────────────────────────
     private static final String SYSTEM_PROMPT =
             "You are CVA (Cognitive Virtual Agent), an advanced AI assistant embedded in an Android keyboard.\n\n" +
-                    "AGENTIC MODE — You can execute shell commands on the device.\n" +
-                    "When the user asks to do something that requires the device (camera, files, search, settings, network, etc):\n" +
-                    "  1. Respond with a JSON block like this (and NOTHING else if you want to run a command):\n" +
+                    "AGENTIC MODE — You execute shell commands on this rooted Android device.\n" +
+                    "When the user asks you to open an app, take a photo, search, adjust settings, or do ANYTHING on the device:\n" +
+                    "  1. Respond with a JSON block like this (and NOTHING ELSE — no explanation):\n" +
                     "     {\"cmd\":\"am start -a android.media.action.IMAGE_CAPTURE\"}\n" +
                     "  2. You will receive the shell output back automatically.\n" +
                     "  3. Keep issuing commands until the task is fully done.\n" +
-                    "  4. When the task is complete, respond with normal text (no JSON cmd block).\n\n" +
+                    "  4. Only reply with plain text AFTER the task is complete.\n\n" +
                     "COMMAND EXAMPLES:\n" +
-                    "  Take photo:    {\"cmd\":\"am start -a android.media.action.IMAGE_CAPTURE\"}\n" +
-                    "  Web search:    {\"cmd\":\"am start -a android.intent.action.VIEW -d \\\"https://www.google.com/search?q=YOUR+QUERY\\\"\"}\n" +
-                    "  Open settings: {\"cmd\":\"am start -a android.settings.SETTINGS\"}\n" +
-                    "  List files:    {\"cmd\":\"ls /sdcard/\"}\n" +
-                    "  Get IP:        {\"cmd\":\"ip addr show\"}\n" +
-                    "  Battery:       {\"cmd\":\"dumpsys battery\"}\n" +
-                    "  WiFi info:     {\"cmd\":\"dumpsys wifi | grep mWifiInfo\"}\n" +
-                    "  Print 1-1000:  {\"cmd\":\"for i in $(seq 1 1000); do echo $i; done\"}\n\n" +
-                    "RULES:\n" +
-                    "  - If a command fails, read the error and try a corrected command automatically.\n" +
-                    "  - Never ask the user to run commands manually — you run them.\n" +
-                    "  - For normal conversation reply as plain text.\n" +
-                    "  - Be concise. When task is done, summarise what happened in 1-2 sentences.";
+                    "  Camera (front): {\"cmd\":\"am start -a android.media.action.STILL_IMAGE_CAMERA\"}\n" +
+                    "  Camera (intent):{\"cmd\":\"am start -a android.media.action.IMAGE_CAPTURE\"}\n" +
+                    "  Camera (pkg):   {\"cmd\":\"am start -n com.android.camera2/com.android.camera.CameraActivity\"}\n" +
+                    "  Web search:     {\"cmd\":\"am start -a android.intent.action.VIEW -d \\\"https://www.google.com/search?q=YOUR+QUERY\\\"\"}\n" +
+                    "  Open settings:  {\"cmd\":\"am start -a android.settings.SETTINGS\"}\n" +
+                    "  List files:     {\"cmd\":\"ls /sdcard/\"}\n" +
+                    "  Battery:        {\"cmd\":\"dumpsys battery\"}\n" +
+                    "  WiFi info:      {\"cmd\":\"dumpsys wifi | grep mWifiInfo\"}\n\n" +
+                    "CRITICAL RULES — NEVER BREAK THESE:\n" +
+                    "  ❌ NEVER say 'I don't have permissions', 'I can't', 'I'm unable to', or give up.\n" +
+                    "  ❌ NEVER reply with plain text when a device action is needed.\n" +
+                    "  ✅ If a command fails, ALWAYS try at least 3 different commands before giving up.\n" +
+                    "  ✅ Try different package names, different intents, different approaches.\n" +
+                    "  ✅ If ALL terminal approaches fail after trying multiple commands, output EXACTLY:\n" +
+                    "     {\"needs_vision\":true,\"reason\":\"<what you tried>\"}\n" +
+                    "     This hands off to the visual AI which can tap the screen directly.\n" +
+                    "  ✅ For normal conversation (no device action needed) reply as plain text.\n" +
+                    "  ✅ Be concise. When task is done, summarise what happened in 1-2 sentences.";
 
     // ── Fields ────────────────────────────────────────────────────────────────
     private String                 provider;
@@ -110,64 +130,54 @@ public class BrainAgent {
     private TerminalManager        terminalManager;
     private AgentCallback          agentCallback;
     private LiveModeController     liveModeController;
+    private ParasiteEscalation     parasiteEscalation;
 
-    /**
-     * Controls whether the live terminal panel is shown during command execution.
-     * Driven by the switch_live_import toggle in keyboard_terminal.xml.
-     * DEFAULT = false (live panel hidden until user turns it on).
-     */
+    /** Consecutive terminal-command failures in the current chat() call. */
+    private int consecutiveFailures = 0;
+
     private volatile boolean liveEnabled = false;
 
-    /** Called by the switch_live_import toggle. Thread-safe. */
     public void setLiveEnabled(boolean enabled) {
         this.liveEnabled = enabled;
-        // If turning OFF while a panel is open, close it immediately
-        if (!enabled && liveModeController != null) {
-            liveModeController.setLiveMode(false);
-        }
+        if (!enabled && liveModeController != null) liveModeController.setLiveMode(false);
     }
-
     public boolean isLiveEnabled() { return liveEnabled; }
 
     // ═════════════════════════════════════════════════════════════════════════
     // Public interfaces
     // ═════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Extended agent callback used by AgentChatView.
-     *
-     * @param statusMsg   Text to show in the agent bubble.
-     * @param isRunning   TRUE  → blink the CVA logo badge.
-     *                    FALSE → stop blinking, finalise the answer bubble.
-     * @param scrollToEnd TRUE  → auto-scroll chat to the newest message.
-     */
     public interface AgentCallback {
         void onAgentStep(String statusMsg, boolean isRunning, boolean scrollToEnd);
     }
 
-    /**
-     * Controls the live-typing terminal panel in AgentChatView (or any custom
-     * view).  Implement and pass via {@link #setLiveModeController}.
-     */
     public interface LiveModeController {
-        /** Show (true) or hide (false) the live terminal panel. */
         void setLiveMode(boolean enabled);
-        /** Append one character to the live display (called per-char with a delay). */
         void typeLiveChar(char c);
-        /** Execute what was typed — equivalent to pressing Enter. */
         void submitLiveInput();
-        /**
-         * Show the command result in the live panel.
-         * @param output  The captured shell output (trimmed).
-         * @param success TRUE → green output, FALSE → red output.
-         */
         void showLiveResult(String output, boolean success);
     }
 
+    /**
+     * Fired when consecutive terminal-command failures exceed {@value BRAIN_MAX_FAILS}.
+     *
+     * <p>Implementors (typically {@link TaskAllocationActivity} or
+     * {@link SmartOverlayService}) should launch a visual scan of the screen
+     * to complete the task in place of the terminal approach.
+     *
+     * @param task      The original user request still needing completion.
+     * @param lastError The most recent shell error output.
+     * @param failCount How many consecutive failures occurred.
+     */
+    public interface ParasiteEscalation {
+        void onEscalate(String task, String lastError, int failCount);
+    }
+
     // ── Setters ───────────────────────────────────────────────────────────────
-    public void setTerminalManager(TerminalManager tm)      { this.terminalManager   = tm; }
-    public void setAgentCallback(AgentCallback cb)          { this.agentCallback     = cb; }
-    public void setLiveModeController(LiveModeController c) { this.liveModeController = c; }
+    public void setTerminalManager(TerminalManager tm)         { this.terminalManager    = tm; }
+    public void setAgentCallback(AgentCallback cb)             { this.agentCallback      = cb; }
+    public void setLiveModeController(LiveModeController c)    { this.liveModeController = c; }
+    public void setParasiteEscalation(ParasiteEscalation pe)   { this.parasiteEscalation = pe; }
 
     // ── Constructor ───────────────────────────────────────────────────────────
     public BrainAgent(String provider, String apiKey, Context context) {
@@ -198,10 +208,34 @@ public class BrainAgent {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // Main chat entry point  ← MUST be called off the main thread
+    // chatOnce() — single AI call, NO agentic loop.
+    // Used by TaskAllocationActivity for task breakdown, planning, and analysis.
+    // MUST be called off the main thread.
+    // ═════════════════════════════════════════════════════════════════════════
+    public String chatOnce(String userMessage) {
+        android.content.SharedPreferences prefs =
+                context.getSharedPreferences("cva_prefs", Context.MODE_PRIVATE);
+        String saved = prefs.getString("provider", provider);
+        if (saved != null && !saved.isEmpty()) this.provider = saved;
+        String resolvedKey = resolveKey();
+        if (resolvedKey != null && !resolvedKey.isEmpty()) this.apiKey = resolvedKey;
+
+        if (apiKey == null || apiKey.isBlank()) {
+            return "[{\"subtask\":\"" + userMessage + "\"}]"; // minimal fallback
+        }
+        try {
+            return callAI(userMessage);
+        } catch (Exception e) {
+            Log.e(TAG, "chatOnce failed", e);
+            return null;
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Main agentic chat entry point — MUST be called off the main thread
     // ═════════════════════════════════════════════════════════════════════════
     public String chat(String userMessage) {
-        // Sync provider + key from prefs every call so changes in Settings take effect immediately
+        // Sync provider + key from prefs every call so settings changes take effect
         android.content.SharedPreferences prefs =
                 context.getSharedPreferences("cva_prefs", Context.MODE_PRIVATE);
         String saved = prefs.getString("provider", provider);
@@ -214,8 +248,22 @@ public class BrainAgent {
                     ". Open CVA Settings, enter your key and press SAVE.";
         }
 
+        consecutiveFailures = 0; // reset per chat() call
+
+        // ── No terminal → skip straight to parasite ───────────────────────────
+        // There is zero point running the agentic loop if we have no shell.
+        // Every command would return "[Error: Terminal not available]", waste
+        // 3+ AI API calls, and hallucinate success. Escalate immediately.
+        if (terminalManager == null && parasiteEscalation != null) {
+            Log.d(TAG, "chat(): no terminal — escalating to parasite immediately");
+            step("⚡ No terminal — handing off to visual agent…", true);
+            parasiteEscalation.onEscalate(userMessage, "No terminal available", 0);
+            if (agentCallback != null)
+                agentCallback.onAgentStep(ESCALATED_MARKER, false, true);
+            return ESCALATED_MARKER;
+        }
+
         try {
-            // ── Signal: agent is starting — show blinking logo ────────────────
             step("⚙ CVA thinking…", true);
 
             String reply = callAI(userMessage);
@@ -225,49 +273,103 @@ public class BrainAgent {
             int loops = 0;
             while (loops < MAX_LOOPS) {
                 String cmd = extractCommand(reply);
-                if (cmd == null) break;   // plain-text reply → task done
+
+                // ── Check for visual hand-off signal ─────────────────────────
+                // If the AI returned {"needs_vision":true,...} it is asking us
+                // to escalate to the parasite immediately.
+                if (cmd == null && isNeedsVision(reply)) {
+                    String reason = extractNeedsVisionReason(reply);
+                    step("🔀 Brain requests visual hand-off: " + reason, true);
+                    Log.d(TAG, "needs_vision detected, escalating to parasite. Reason: " + reason);
+                    if (parasiteEscalation != null) {
+                        parasiteEscalation.onEscalate(userMessage, reason, -1);
+                    }
+                    if (agentCallback != null)
+                        agentCallback.onAgentStep(ESCALATED_MARKER, false, true);
+                    return ESCALATED_MARKER;
+                }
+
+                // ── Check for a give-up / refusal plain-text reply ────────────
+                // The AI said "I can't / I don't have permission / I'm unable to"
+                // instead of trying a command. Treat this as a hard failure and
+                // escalate to the parasite immediately.
+                if (cmd == null && isRefusalReply(reply)) {
+                    consecutiveFailures++;
+                    step("⚠ Brain gave up verbally (" + consecutiveFailures + "/" + BRAIN_MAX_FAILS
+                            + "): " + truncate(reply, 80), true);
+                    Log.w(TAG, "Brain refusal detected (loops=" + loops + "): " + reply);
+
+                    if (consecutiveFailures >= BRAIN_MAX_FAILS || loops == 0) {
+                        // Escalate on first refusal if it's the very first reply
+                        // (the AI gave up without even trying once).
+                        if (parasiteEscalation != null) {
+                            step("🔀 Escalating to parasite (verbal refusal)…", true);
+                            parasiteEscalation.onEscalate(userMessage, reply, consecutiveFailures);
+                        }
+                        if (agentCallback != null)
+                            agentCallback.onAgentStep(ESCALATED_MARKER, false, true);
+                        return ESCALATED_MARKER;
+                    }
+
+                    // Try to prompt the AI again more forcefully
+                    String retry = "[SYSTEM: You MUST try a terminal command. Do NOT say you can't. " +
+                            "Output {\"cmd\":\"...\"} with a different approach. " +
+                            "If you have tried terminal and it truly fails, output {\"needs_vision\":true}.]\n" +
+                            "Retry the task: " + userMessage;
+                    reply = callAI(retry);
+                    if (reply == null) reply = "";
+                    loops++;
+                    continue;
+                }
+
+                if (cmd == null) break; // genuine task-complete plain-text reply
 
                 loops++;
 
-                // ── STEP 1: open live terminal panel (only if switch is ON) ───
+                // ── Show in live terminal panel ───────────────────────────────
                 step("⌨ Typing command…", true);
                 if (liveEnabled) setLiveMode(true);
-
-                // ── STEP 2: type command letter-by-letter ─────────────────────
                 step("⌨ " + cmd, true);
                 if (liveEnabled) typeLive(cmd);
-
-                // ── STEP 3: press Enter ───────────────────────────────────────
                 step("▶ Executing…", true);
                 if (liveEnabled) submitLive();
 
-                // ── STEP 4: capture output via TerminalManager ────────────────
+                // ── Run the command ───────────────────────────────────────────
                 String output = runShellCommand(cmd);
 
-                // Detect success vs error (exit marker or known error keywords)
                 boolean success = !output.toLowerCase().contains("error")
                         && !output.toLowerCase().contains("not found")
                         && !output.toLowerCase().contains("permission denied")
                         && !output.toLowerCase().contains("exception")
                         && !output.startsWith("[Error");
 
-                // Show coloured result in live panel (only if switch is ON)
                 if (liveEnabled) {
                     showLiveResult(output, success);
-                    sleep(600);  // let user read the result before panel closes
+                    sleep(600);
                 }
 
-                // Update thinking bubble with coloured status
                 if (success) {
+                    consecutiveFailures = 0;
                     step("✓ Done: " + truncate(output, 120), true);
                 } else {
-                    step("✗ Error: " + truncate(output, 120), true);
+                    consecutiveFailures++;
+                    step("✗ Error (" + consecutiveFailures + "/" + BRAIN_MAX_FAILS + "): "
+                            + truncate(output, 100), true);
+
+                    // ── ESCALATE TO PARASITE after BRAIN_MAX_FAILS failures ───
+                    if (consecutiveFailures >= BRAIN_MAX_FAILS && parasiteEscalation != null) {
+                        if (liveEnabled) setLiveMode(false);
+                        step("🔀 Escalating to parasite after " + consecutiveFailures + " failures…", true);
+                        parasiteEscalation.onEscalate(userMessage, output, consecutiveFailures);
+                        if (agentCallback != null)
+                            agentCallback.onAgentStep(ESCALATED_MARKER, false, true);
+                        return ESCALATED_MARKER;
+                    }
                 }
 
-                // ── STEP 5: close live terminal panel ─────────────────────────
                 if (liveEnabled) setLiveMode(false);
 
-                // ── STEP 6: feed output back to AI ────────────────────────────
+                // Feed output back to AI
                 step("⚙ CVA analysing output…", true);
                 String feedback = "[TERMINAL OUTPUT for cmd: " + cmd + "]\n" + output +
                         "\n\nContinue the task or summarise if done.";
@@ -277,7 +379,6 @@ public class BrainAgent {
 
             if (loops >= MAX_LOOPS) reply += "\n\n[CVA: reached max steps — stopping.]";
 
-            // ── Final answer — stop blinking logo, scroll to bottom ───────────
             if (agentCallback != null) agentCallback.onAgentStep(reply, false, true);
             return reply;
 
@@ -302,14 +403,13 @@ public class BrainAgent {
         if (liveModeController != null) liveModeController.showLiveResult(output, success);
     }
 
-    /** Types every character of {@code cmd} with a small delay between each. */
     private void typeLive(String cmd) {
         if (liveModeController == null) return;
         for (char c : cmd.toCharArray()) {
             liveModeController.typeLiveChar(c);
             sleep(LIVE_CHAR_DELAY);
         }
-        sleep(350);   // brief pause so user can read the full command before it runs
+        sleep(350);
     }
 
     private void submitLive() {
@@ -321,7 +421,6 @@ public class BrainAgent {
         try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
 
-    // ── Shorthand step notification ───────────────────────────────────────────
     private void step(String msg, boolean running) {
         if (agentCallback != null) agentCallback.onAgentStep(msg, running, true);
     }
@@ -340,11 +439,75 @@ public class BrainAgent {
         return null;
     }
 
+    /**
+     * Returns true when the AI replied with a plain-text give-up message
+     * instead of a {"cmd":...} block.
+     *
+     * These are the phrases we saw in the log:
+     *   "I don't have the necessary permissions"
+     *   "I can't proceed"
+     *   "I'm unable to"
+     *   "I cannot"
+     *   "I don't have access"
+     *   "not possible for me"
+     *   "I am not able"
+     */
+    private static boolean isRefusalReply(String reply) {
+        if (reply == null || reply.contains("{\"cmd\"") || reply.contains("\"cmd\":")) return false;
+        String lower = reply.toLowerCase();
+        return lower.contains("i don't have the necessary")
+                || lower.contains("i don't have permission")
+                || lower.contains("i don't have access")
+                || lower.contains("i can't proceed")
+                || lower.contains("i can't open")
+                || lower.contains("i can't access")
+                || lower.contains("i'm unable to")
+                || lower.contains("i am unable to")
+                || lower.contains("i cannot open")
+                || lower.contains("i cannot access")
+                || lower.contains("i cannot directly")
+                || lower.contains("i am not able")
+                || lower.contains("not possible for me")
+                || lower.contains("unable to directly")
+                || lower.contains("don't have the ability")
+                || lower.contains("i lack the ability")
+                || lower.contains("requires physical")
+                || lower.contains("as a text-based")
+                || lower.contains("as an ai");
+    }
+
+    /**
+     * Returns true when the AI returned {"needs_vision":true,...}.
+     * This is the explicit hand-off signal we added to the system prompt.
+     */
+    private static boolean isNeedsVision(String reply) {
+        if (reply == null) return false;
+        try {
+            int s = reply.indexOf('{'), e = reply.lastIndexOf('}');
+            if (s < 0 || e < 0 || e <= s) return false;
+            JSONObject obj = new JSONObject(reply.substring(s, e + 1));
+            return obj.optBoolean("needs_vision", false);
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private static String extractNeedsVisionReason(String reply) {
+        if (reply == null) return "terminal exhausted";
+        try {
+            int s = reply.indexOf('{'), e = reply.lastIndexOf('}');
+            if (s >= 0 && e > s) {
+                JSONObject obj = new JSONObject(reply.substring(s, e + 1));
+                return obj.optString("reason", "terminal exhausted");
+            }
+        } catch (Exception ignored) {}
+        return "terminal exhausted";
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
     // Shell execution (sentinel pattern — waits up to 15 s for output)
     // ═════════════════════════════════════════════════════════════════════════
     private String runShellCommand(String cmd) {
-        if (terminalManager == null) return "[Terminal not available]";
+        if (terminalManager == null) return "[Error: Terminal not available]";
         try {
             StringBuilder  out      = new StringBuilder();
             CountDownLatch latch    = new CountDownLatch(1);
@@ -364,7 +527,6 @@ public class BrainAgent {
             int si = result.indexOf(sentinel);
             if (si >= 0) result = result.substring(0, si);
 
-            // Strip echoed command line (usually the first line)
             String[] lines = result.split("\n");
             StringBuilder clean = new StringBuilder();
             for (int i = 0; i < lines.length; i++) {
@@ -429,14 +591,12 @@ public class BrainAgent {
         addUser(userMessage);
 
         JSONArray contents = new JSONArray();
-        // system turn
         JSONObject sysMsg = new JSONObject(); sysMsg.put("role", "user");
         JSONArray sp = new JSONArray(); sp.put(new JSONObject().put("text", buildSystem()));
         sysMsg.put("parts", sp); contents.put(sysMsg);
         JSONObject ack = new JSONObject(); ack.put("role", "model");
         JSONArray ap = new JSONArray(); ap.put(new JSONObject().put("text", "Understood. I am CVA."));
         ack.put("parts", ap); contents.put(ack);
-        // history
         for (JSONObject m : window()) {
             String role = m.getString("role").equals("assistant") ? "model" : "user";
             JSONObject t = new JSONObject(); t.put("role", role);
@@ -464,7 +624,8 @@ public class BrainAgent {
                 return reply;
             } catch (Exception e) {
                 last = e;
-                if (e.getMessage() != null && (e.getMessage().contains("API_KEY_INVALID") || e.getMessage().contains("403"))) throw e;
+                if (e.getMessage() != null && (e.getMessage().contains("API_KEY_INVALID") ||
+                        e.getMessage().contains("403"))) throw e;
             }
         }
         throw new Exception("All Gemini models exhausted. " + (last != null ? last.getMessage() : ""));
@@ -530,7 +691,8 @@ public class BrainAgent {
                 return reply;
             } catch (Exception e) {
                 last = e;
-                if (e.getMessage() != null && (e.getMessage().contains("HTTP 401") || e.getMessage().contains("invalid_api_key"))) throw e;
+                if (e.getMessage() != null && (e.getMessage().contains("HTTP 401") ||
+                        e.getMessage().contains("invalid_api_key"))) throw e;
             }
         }
         throw new Exception("All Groq models unavailable. " + (last != null ? last.getMessage() : ""));
@@ -584,17 +746,27 @@ public class BrainAgent {
     // Memory
     // ═════════════════════════════════════════════════════════════════════════
     private void loadMemory() {
-        try { memoryContext = CvakiStorage.load(context, "brain_memory"); }
+        try { memoryContext = CvakiStorage.loadMain(context, "brain_memory"); }
         catch (Exception e) { memoryContext = ""; }
+        if (memoryContext == null) memoryContext = "";
     }
+
     private void maybeSaveMemory(String reply) {
         if (!reply.contains("[MEMORY]")) return;
         try {
             String updated = memoryContext + "\n" + reply.replace("[MEMORY]", "").trim();
-            CvakiStorage.save(context, "brain_memory", updated);
+            CvakiStorage.saveMain(context, "brain_memory", updated);
             memoryContext = updated;
         } catch (Exception e) { Log.e(TAG, "saveMemory failed", e); }
     }
-    public void clearHistory() { history.clear(); }
-    public void clearMemory()  { memoryContext = ""; CvakiStorage.delete(context, "brain_memory"); }
+
+    public void clearHistory() {
+        history.clear();
+        consecutiveFailures = 0;
+    }
+
+    public void clearMemory() {
+        memoryContext = "";
+        CvakiStorage.deleteMain(context, "brain_memory");
+    }
 }

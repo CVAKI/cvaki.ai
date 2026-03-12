@@ -337,7 +337,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String providerLabel(String p) {
         switch (p) {
-            case BrainAgent.PROVIDER_GEMINI:     return "Google Gemini";
+            case BrainAgent.PROVIDER_GEMINI:     return "Google Gemini 2.5 Flash";
             case BrainAgent.PROVIDER_OPENROUTER: return "OpenRouter (Llama 3.3 70B free)";
             case BrainAgent.PROVIDER_GROQ:       return "Groq (Llama 3.3 70B free ⚡)";
             default:                             return "Anthropic Claude";

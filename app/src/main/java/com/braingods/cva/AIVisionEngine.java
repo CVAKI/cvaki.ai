@@ -24,20 +24,16 @@ import java.util.List;
  * and returns a structured list of ScreenActions to execute.
  *
  * Action types:
- *   CLICK   — tap pixel (x, y)
- *   TYPE    — inject text at current focus
+ *   CLICK         — tap pixel (x, y)
+ *   TYPE          — inject text at current focus
  *   TELEPORT_TYPE — click (x,y) then type text
- *   SCROLL  — swipe from (x1,y1) to (x2,y2)
- *   WAIT    — pause for delayMs
- *   DONE    — task complete, speak message
+ *   SCROLL        — swipe from (x1,y1) to (x2,y2)
+ *   WAIT          — pause for delayMs
+ *   DONE          — task complete, speak message
  *
- * The AI is prompted to return a strict JSON array of actions.
- *
- * Example response:
- * [
- *   {"type":"CLICK","x":540,"y":960,"note":"Tap option B radio button"},
- *   {"type":"DONE","message":"Answered question 3 — option B selected"}
- * ]
+ * FIXES vs previous version:
+ *   - Gemini now calls /v1beta/ (system_instruction + responseMimeType require beta)
+ *   - ThinkingCallback lets callers stream "still thinking…" dots live
  */
 public class AIVisionEngine {
 
@@ -66,19 +62,28 @@ public class AIVisionEngine {
         }
     }
 
-    // ── Callback ──────────────────────────────────────────────────────────────
+    // ── Callbacks ─────────────────────────────────────────────────────────────
 
     public interface VisionCallback {
         void onActions(List<ScreenAction> actions);
         void onError(String message);
     }
 
+    /**
+     * Optional: called periodically while the AI is still processing so the UI
+     * can show a live "thinking…" indicator.  Fire with null to signal done.
+     */
+    public interface ThinkingCallback {
+        /** @param dot incremental "." chars (1-4) or null = finished */
+        void onThinkingTick(String dot);
+    }
+
     // ── Config ────────────────────────────────────────────────────────────────
 
     private final String apiKey;
-    private final String provider; // "anthropic" | "gemini"
+    private final String provider; // "anthropic" | "gemini" | "openrouter" | "groq"
 
-    // AI image width used when building prompts (we scale to this before encoding)
+    /** AI image width used when building prompts (scaled before encoding) */
     private static final int AI_IMG_WIDTH = 768;
 
     public AIVisionEngine(String apiKey, String provider) {
@@ -105,18 +110,23 @@ public class AIVisionEngine {
                     "- For MCQ / radio buttons: identify the correct option, output CLICK on that radio circle.\n" +
                     "- For text fields: use TELEPORT_TYPE (click field first, then type).\n" +
                     "- End EVERY response with a DONE action.\n" +
-                    "- Output ONLY the JSON array. No explanation, no markdown, no code fences.\n";
+                    "- Output ONLY the JSON array. No explanation, no markdown, no code fences.\n" +
+                    "- If the screen appears BLACK or EMPTY, still output a valid JSON array:\n" +
+                    "  [{\"type\":\"DONE\",\"message\":\"Screen appears blank — no actions taken\"}]\n" +
+                    "- NEVER respond with plain text. ALWAYS respond with a JSON array, even on errors.\n";
 
     // ── Main entry point ──────────────────────────────────────────────────────
 
     /**
-     * Analyze screenshot and return actions. Run on a background thread.
+     * Analyze screenshot and return actions.  Run on a background thread.
      *
-     * @param screenshot  Full-resolution bitmap (will be scaled internally)
+     * @param screenshot  Full-resolution bitmap (scaled internally)
      * @param task        User intent, e.g. "Answer the MCQ question on screen"
-     * @param cb          Callback — fires on calling thread
+     * @param thinkingCb  Optional – called every ~2 s while waiting for the AI
+     * @param cb          Result callback – fires on the calling thread
      */
-    public void analyze(Bitmap screenshot, String task, VisionCallback cb) {
+    public void analyze(Bitmap screenshot, String task,
+                        ThinkingCallback thinkingCb, VisionCallback cb) {
         // Scale to AI_IMG_WIDTH for reasonable token usage
         Bitmap scaled = scaleBitmap(screenshot, AI_IMG_WIDTH);
         int imgW = scaled.getWidth();
@@ -131,6 +141,24 @@ public class AIVisionEngine {
                 "Image size: " + imgW + "×" + imgH + " px. " +
                 "Return actions with coordinates matching this image size.";
 
+        // ── Thinking ticker thread ────────────────────────────────────────────
+        Thread ticker = null;
+        if (thinkingCb != null) {
+            ticker = new Thread(() -> {
+                int dot = 0;
+                String[] dots = {".", "..", "...", "...."};
+                while (!Thread.currentThread().isInterrupted()) {
+                    thinkingCb.onThinkingTick(dots[dot % 4]);
+                    dot++;
+                    try { Thread.sleep(1800); } catch (InterruptedException e) { break; }
+                }
+                // signal done
+                thinkingCb.onThinkingTick(null);
+            });
+            ticker.setDaemon(true);
+            ticker.start();
+        }
+
         try {
             String rawJson;
             if ("gemini".equalsIgnoreCase(provider)) {
@@ -138,12 +166,12 @@ public class AIVisionEngine {
             } else if ("openrouter".equalsIgnoreCase(provider)) {
                 rawJson = callOpenRouterVision(base64, userPrompt);
             } else if ("groq".equalsIgnoreCase(provider)) {
-                // Groq has no vision API — give a clear error instead of sending
-                // a Groq key to api.anthropic.com and getting a confusing 401.
-                cb.onError("Groq does not support vision. Use Anthropic, Gemini, or OpenRouter (free). Go to Settings, change provider, and Save.");
+                // Groq has no vision API
+                cb.onError("Groq does not support vision. Use Anthropic, Gemini, or OpenRouter. " +
+                        "Go to Settings, change provider, and Save.");
                 return;
             } else {
-                // "anthropic" or any unknown provider — use Claude
+                // "anthropic" or unknown → Claude
                 rawJson = callClaude(base64, userPrompt);
             }
 
@@ -154,10 +182,19 @@ public class AIVisionEngine {
         } catch (Exception e) {
             Log.e(TAG, "Vision API error", e);
             cb.onError(e.getMessage());
+        } finally {
+            if (ticker != null) ticker.interrupt();
         }
     }
 
-    // ── Claude Vision (claude-haiku-4-5-20251001 or sonnet) ──────────────────
+    /**
+     * Convenience overload — no thinking callback (backwards-compatible).
+     */
+    public void analyze(Bitmap screenshot, String task, VisionCallback cb) {
+        analyze(screenshot, task, null, cb);
+    }
+
+    // ── Claude Vision ─────────────────────────────────────────────────────────
 
     private String callClaude(String base64, String userPrompt) throws Exception {
         JSONObject req = new JSONObject();
@@ -197,22 +234,57 @@ public class AIVisionEngine {
 
         String body = readBody(conn);
         JSONObject resp = new JSONObject(body);
-
-        // Extract text from content[0].text
         return resp.getJSONArray("content").getJSONObject(0).getString("text");
     }
 
     // ── Gemini Vision ─────────────────────────────────────────────────────────
+    // Uses /v1beta/ for system_instruction + responseMimeType support.
+    // Auto-falls-back through model list on 429 (quota) or 404 (not found).
+
+    // Models tried in order — stops at first success.
+    // Free-tier keys often only have access to 1.5-flash or 1.5-flash-8b.
+    private static final String[] GEMINI_MODELS = {
+            "gemini-2.0-flash",        // best: GA, vision, fast
+            "gemini-1.5-flash",        // solid fallback, widely available
+            "gemini-1.5-flash-8b",     // lightest free-tier model
+    };
 
     private String callGemini(String base64, String userPrompt,
                               int imgW, int imgH) throws Exception {
-        String model = "gemini-1.5-flash";
-        String url   = "https://generativelanguage.googleapis.com/v1beta/models/"
+        Exception lastErr = null;
+        for (String model : GEMINI_MODELS) {
+            try {
+                Log.d(TAG, "Gemini trying model: " + model);
+                return callGeminiModel(model, base64, userPrompt);
+            } catch (Exception e) {
+                String msg = e.getMessage() != null ? e.getMessage() : "";
+                // Only retry on 429 (quota) or 404 (model not found on this key)
+                if (msg.contains("429") || msg.contains("404")) {
+                    Log.w(TAG, "Gemini model " + model + " unavailable (" +
+                            (msg.contains("429") ? "quota" : "not found") + "), trying next…");
+                    lastErr = e;
+                } else {
+                    throw e; // hard error (400 bad request, 403 invalid key, etc.) — stop immediately
+                }
+            }
+        }
+        // All models exhausted — give the user a clear, actionable message
+        throw new Exception(
+                "Gemini quota exceeded on all models.\n" +
+                        "Your free-tier limit is 0 — you need to either:\n" +
+                        "  1. Enable billing at https://ai.google.dev\n" +
+                        "  2. Wait for your daily quota to reset\n" +
+                        "  3. Switch to OpenRouter (free vision) in Settings");
+    }
+
+    private String callGeminiModel(String model, String base64,
+                                   String userPrompt) throws Exception {
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/"
                 + model + ":generateContent?key=" + apiKey;
 
         JSONObject req = new JSONObject();
 
-        // System instruction
+        // System instruction (v1beta only)
         JSONObject sysInst = new JSONObject();
         sysInst.put("parts", new JSONArray().put(
                 new JSONObject().put("text", SYSTEM_PROMPT)));
@@ -236,7 +308,7 @@ public class AIVisionEngine {
 
         req.put("contents", new JSONArray().put(userContent));
 
-        // Generation config
+        // Generation config (responseMimeType supported in v1beta)
         JSONObject genCfg = new JSONObject();
         genCfg.put("maxOutputTokens", 1024);
         genCfg.put("responseMimeType", "application/json");
@@ -247,6 +319,8 @@ public class AIVisionEngine {
 
         String body = readBody(conn);
         JSONObject resp = new JSONObject(body);
+
+        Log.i(TAG, "Gemini success with model: " + model);
         return resp.getJSONArray("candidates")
                 .getJSONObject(0)
                 .getJSONObject("content")
@@ -257,18 +331,12 @@ public class AIVisionEngine {
 
     // ── OpenRouter Vision ─────────────────────────────────────────────────────
 
-    /**
-     * OpenRouter vision call using google/gemini-flash-1.5 (free, supports images).
-     * Falls back gracefully if the model changes.
-     */
-    // Free vision-capable models on OpenRouter, tried in order until one works
     private static final String[] OR_FREE_VISION_MODELS = {
-            "google/gemini-2.0-flash-exp:free",               // best free vision
-            "meta-llama/llama-3.2-11b-vision-instruct:free",  // solid free fallback
-            "google/gemini-flash-1.5",                        // older Gemini
+            "google/gemini-2.0-flash-001",          // GA, vision, free tier
+            "meta-llama/llama-3.2-11b-vision-instruct",  // Meta vision, free tier
+            "google/gemini-2.0-flash-lite-001",       // lightest Gemini, free tier
     };
 
-    /** Tries each free vision model in order; throws only if ALL fail. */
     private String callOpenRouterVision(String base64, String userPrompt) throws Exception {
         Exception lastErr = null;
         for (String model : OR_FREE_VISION_MODELS) {
@@ -289,13 +357,11 @@ public class AIVisionEngine {
         req.put("model", model);
         req.put("max_tokens", 1024);
 
-        // System message
         JSONArray messages = new JSONArray();
         messages.put(new JSONObject()
                 .put("role", "system")
                 .put("content", SYSTEM_PROMPT));
 
-        // User message with image + text
         JSONArray userContent = new JSONArray();
         userContent.put(new JSONObject()
                 .put("type", "image_url")
@@ -322,10 +388,6 @@ public class AIVisionEngine {
 
     // ── Parse JSON actions ────────────────────────────────────────────────────
 
-    /**
-     * Parse AI JSON response and scale coordinates from AI image space
-     * back to real screen pixels.
-     */
     private List<ScreenAction> parseActions(String rawJson,
                                             int screenW, int screenH,
                                             int aiImgW,  int aiImgH) {
@@ -334,7 +396,6 @@ public class AIVisionEngine {
         float sy = (float) screenH / aiImgH;
 
         try {
-            // Strip markdown fences if AI added them
             String json = rawJson.trim();
             if (json.startsWith("```")) {
                 json = json.replaceAll("(?s)^```[a-z]*\\n?", "")
@@ -381,9 +442,13 @@ public class AIVisionEngine {
             }
         } catch (Exception e) {
             Log.e(TAG, "parseActions error: " + e.getMessage() + "\nRaw: " + rawJson);
+            // Try to detect if AI returned prose instead of JSON (model ignored instructions)
+            String hint = rawJson != null && rawJson.length() > 10
+                    ? " | AI said: " + rawJson.trim().substring(0, Math.min(120, rawJson.trim().length()))
+                    : "";
             ScreenAction err = new ScreenAction();
             err.type = ActionType.ERROR;
-            err.text = "Parse error: " + e.getMessage();
+            err.text = "AI returned text instead of JSON." + hint;
             list.add(err);
         }
         return list;
@@ -414,7 +479,7 @@ public class AIVisionEngine {
         c.setRequestMethod("POST");
         c.setDoOutput(true);
         c.setConnectTimeout(15_000);
-        c.setReadTimeout(60_000);
+        c.setReadTimeout(90_000);   // 90 s — Gemini 2.5 thinking can be slow
         c.setRequestProperty("Content-Type", "application/json");
         return c;
     }
@@ -430,11 +495,13 @@ public class AIVisionEngine {
         java.io.InputStream is = (code >= 200 && code < 300)
                 ? c.getInputStream() : c.getErrorStream();
         StringBuilder sb = new StringBuilder();
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+        try (BufferedReader r = new BufferedReader(
+                new InputStreamReader(is, StandardCharsets.UTF_8))) {
             String line; while ((line = r.readLine()) != null) sb.append(line).append('\n');
         }
         if (code < 200 || code >= 300)
-            throw new Exception("HTTP " + code + ": " + sb.toString().substring(0, Math.min(200, sb.length())));
+            throw new Exception("HTTP " + code + ": " +
+                    sb.toString().substring(0, Math.min(400, sb.length())));
         return sb.toString();
     }
 }

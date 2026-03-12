@@ -73,6 +73,12 @@ public class ScreenCaptureManager {
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
+    // Track in-flight capture resources so release() can kill them immediately,
+    // preventing the "dequeueBuffer: BufferQueue has been abandoned" logspam that
+    // occurs when the old ImageReader outlives its VirtualDisplay.
+    private volatile ImageReader     activeReader;
+    private volatile VirtualDisplay  activeDisplay;
+
     private ScreenCaptureManager(Context ctx, int resultCode, Intent data) {
         this.ctx = ctx;
 
@@ -126,6 +132,10 @@ public class ScreenCaptureManager {
                 screenWidth, screenHeight, screenDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 reader.getSurface(), null, null);
+
+        // Register for cleanup on release()
+        activeReader  = reader;
+        activeDisplay = vdRef[0];
 
         int[] attempts = {0};
         final int MAX_ATTEMPTS = 10;
@@ -210,6 +220,9 @@ public class ScreenCaptureManager {
                 try { if (vd[0] != null) { vd[0].release(); vd[0] = null; } } catch (Exception ignored) {}
                 try { rd.close(); } catch (Exception ignored) {}
                 try { thread.quitSafely(); } catch (Exception ignored) {}
+                // Clear instance refs so release() won't double-free
+                activeReader  = null;
+                activeDisplay = null;
             }
 
         }, bgHandler);
@@ -251,6 +264,9 @@ public class ScreenCaptureManager {
     // ── Cleanup ───────────────────────────────────────────────────────────────
 
     public void release() {
+        // Kill any in-flight capture first — prevents BufferQueue abandoned spam
+        try { if (activeReader  != null) { activeReader.setOnImageAvailableListener(null, null); activeReader.close();  activeReader  = null; } } catch (Exception ignored) {}
+        try { if (activeDisplay != null) { activeDisplay.release(); activeDisplay = null; } } catch (Exception ignored) {}
         if (projection != null) projection.stop();
     }
 

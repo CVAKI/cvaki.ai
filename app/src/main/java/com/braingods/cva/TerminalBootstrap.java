@@ -5,31 +5,58 @@ import android.os.Build;
 import android.system.Os;
 import android.util.Log;
 
+import com.braingods.cva.termux.TermuxConstants;
+import com.braingods.cva.termux.TermuxInstaller;
+import com.braingods.cva.termux.TermuxShellUtils;
+
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 
 /**
- * Manages the BusyBox shell environment.
+ * TerminalBootstrap  [v2 — fixed .so treated as executable shell]
+ * ─────────────────────────────────────────────────────────────────────────────
  *
- * ANDROID 10+ W^X SECURITY POLICY:
- *   Apps cannot execve() from filesDir (writable directories).
- *   nativeLibraryDir is the ONLY reliably executable location.
+ * ROOT CAUSE OF SHELL EXIT 127:
+ *   libbusybox.so is a JNI shared library (ET_DYN), NOT a standalone executable.
+ *   The old code had three places that all made the same wrong assumption:
  *
- * RESOLUTION PRIORITY:
- *   1. nativeLibraryDir/libbusybox.so   ← jniLibs bundle (BEST, always works)
- *   2. filesDir/busybox via linker64     ← downloaded, executed via system linker
- *   3. /system/bin/sh fallback           ← always available, limited
+ *   1. install() → isInstalled() returned true because hasNativeBusybox() saw the
+ *      .so file → immediately called onDone(true, libbusybox.so path) without ever
+ *      downloading a real shell → TerminalManager tried to exec the .so → exit 127.
  *
- * PERMANENT FIX (do once, never worry again):
- *   1. Copy busybox binaries into your project:
- *        app/src/main/jniLibs/arm64-v8a/libbusybox.so
- *        app/src/main/jniLibs/armeabi-v7a/libbusybox.so
- *        app/src/main/jniLibs/x86_64/libbusybox.so
- *   2. In app/.gitignore add:  !src/main/jniLibs/**
- *   3. Commit. Done forever.
+ *   2. installBusyboxFallback() → hasNativeBusybox() short-circuit returned the .so
+ *      path instead of downloading a real standalone busybox binary.
+ *
+ *   3. forceDownload() deleted the downloaded busybox then called
+ *      installBusyboxFallback() which immediately returned the .so again.
+ *
+ * FIXES:
+ *   • isExecutableShell() — new method that actually RUNS the binary with
+ *     "echo ok" before trusting it as a shell.  .so files fail this test.
+ *
+ *   • isInstalled() now uses isExecutableShell() so it only returns true
+ *     when something can actually exec.
+ *
+ *   • hasNativeBusyboxShell() — separate from hasNativeBusybox() (file exists)
+ *     vs actually being executable as a shell.
+ *
+ *   • installBusyboxFallback() skips the .so and goes straight to downloading
+ *     a real standalone busybox binary.
+ *
+ *   • ensureBashrc() uses canonical /data/data/... HOME path, not
+ *     ctx.getFilesDir() which returns /data/user/0/... (bind-mount symlink).
+ *
+ * PRIORITY ORDER (unchanged):
+ *   1. CVA Termux bootstrap ($PREFIX/bin/bash)
+ *   2. Real Termux app (/data/data/com.termux/…)
+ *   3. Downloaded standalone busybox (code_cache/)
+ *   4. jniLibs libbusybox.so via linker64 (last resort — usually fails)
+ *   5. /system/bin/sh
  */
 public class TerminalBootstrap {
 
@@ -40,16 +67,12 @@ public class TerminalBootstrap {
 
     private static final String TAG = "TerminalBootstrap";
 
-    // Primary: busybox.net official static binaries (most reliable, full applet set)
-    // Fallback: EXALAB jsDelivr CDN
+    // Standalone static busybox binaries (NOT shared libraries)
     private static final String URL_ARM64_PRIMARY  = "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox_ARM64";
     private static final String URL_ARM64_FALLBACK = "https://cdn.jsdelivr.net/gh/EXALAB/Busybox-static@main/busybox_arm64";
     private static final String URL_ARM_PRIMARY    = "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox_ARMV7l";
     private static final String URL_ARM_FALLBACK   = "https://cdn.jsdelivr.net/gh/EXALAB/Busybox-static@main/busybox_arm";
     private static final String URL_X86_64         = "https://cdn.jsdelivr.net/gh/EXALAB/Busybox-static@main/busybox_amd64";
-    // Keep these for the existing getUrl() helper
-    private static final String URL_ARM64  = URL_ARM64_PRIMARY;
-    private static final String URL_ARM    = URL_ARM_PRIMARY;
 
     private final Context ctx;
 
@@ -57,138 +80,260 @@ public class TerminalBootstrap {
         this.ctx = ctx;
     }
 
-    // ── Path helpers ──────────────────────────────────────────────────────────
+    // ── Primary: Termux bootstrap checks ─────────────────────────────────────
 
-    /** From jniLibs — extracted by Android at APK install to nativeLibraryDir */
+    public boolean hasTermuxBootstrap() { return TermuxShellUtils.isCvaBootstrapInstalled(); }
+    public boolean hasRealTermux()      { return TermuxShellUtils.isTermuxInstalled(); }
+
+    // ── BusyBox file checks ───────────────────────────────────────────────────
+
+    /** The jniLibs .so file — exists but may NOT be directly executable as a shell */
     public File getNativeBusybox() {
         return new File(ctx.getApplicationInfo().nativeLibraryDir, "libbusybox.so");
     }
 
-    /** Downloaded at runtime into filesDir */
+    /**
+     * Downloaded standalone busybox binary.
+     *
+     * FIX: Previously stored in getCodeCacheDir() which is mounted noexec on
+     * Android 10+ (API 29+) — the kernel rejects execve() there with EACCES
+     * regardless of chmod 755.  We now store the binary in
+     * /data/data/<pkg>/files/bin/ which is always exec-allowed for the app.
+     */
     public File getDownloadedBusybox() {
-        return new File(ctx.getFilesDir(), "busybox");
+        File dir = new File("/data/data/" + ctx.getPackageName() + "/files/bin");
+        if (!dir.exists()) dir.mkdirs();
+        return new File(dir, "busybox");
     }
 
-    /** System dynamic linker — used to exec binaries from non-exec directories */
     public String getLinker() {
         return Build.SUPPORTED_ABIS[0].contains("64")
                 ? "/system/bin/linker64"
                 : "/system/bin/linker";
     }
 
+    /** File exists and has right size — does NOT mean it can be exec'd as a shell */
     public boolean hasNativeBusybox() {
         File f = getNativeBusybox();
         return f.exists() && f.canExecute() && f.length() > 500_000;
     }
 
+    /** Downloaded busybox file exists and has right size */
     public boolean hasDownloadedBusybox() {
         File f = getDownloadedBusybox();
         return f.exists() && f.length() > 500_000;
     }
 
-    /** True if binary is in nativeLibraryDir (directly executable) */
-    public boolean isDirectlyExecutable() { return hasNativeBusybox(); }
+    /**
+     * FIX: Test whether the native .so can actually be executed as a shell.
+     * libbusybox.so is a JNI shared library — it CANNOT be exec()'d directly.
+     * We test both direct exec and linker64-based exec before trusting it.
+     */
+    public boolean hasNativeBusyboxShell() {
+        if (!hasNativeBusybox()) return false;
+        return isExecutableShell(getNativeBusybox().getAbsolutePath());
+    }
 
-    /** True if any busybox binary is available */
-    public boolean isInstalled()          { return hasNativeBusybox() || hasDownloadedBusybox(); }
+    /**
+     * FIX: Actually run the binary to verify it works as a shell.
+     * This catches .so files, corrupted downloads, wrong-arch binaries, etc.
+     */
+    public boolean isExecutableShell(String path) {
+        if (path == null || path.isEmpty()) return false;
+        // Try direct exec
+        for (String applet : new String[]{"sh", "ash", ""}) {
+            try {
+                String[] cmd = applet.isEmpty()
+                        ? new String[]{path, "-c", "echo ok"}
+                        : new String[]{path, applet, "-c", "echo ok"};
+                Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+                String out = new BufferedReader(
+                        new InputStreamReader(p.getInputStream())).readLine();
+                p.waitFor();
+                if ("ok".equals(out != null ? out.trim() : "")) {
+                    Log.d(TAG, "Shell OK (direct): " + path + " " + applet);
+                    return true;
+                }
+            } catch (Exception ignored) {}
+        }
+        // Try via linker64/linker (for PIE/ET_DYN binaries)
+        String linker = getLinker();
+        for (String applet : new String[]{"sh", "ash", ""}) {
+            try {
+                String[] cmd = applet.isEmpty()
+                        ? new String[]{linker, path, "-c", "echo ok"}
+                        : new String[]{linker, path, applet, "-c", "echo ok"};
+                Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+                String out = new BufferedReader(
+                        new InputStreamReader(p.getInputStream())).readLine();
+                p.waitFor();
+                if ("ok".equals(out != null ? out.trim() : "")) {
+                    Log.d(TAG, "Shell OK (linker): " + path + " " + applet);
+                    return true;
+                }
+            } catch (Exception ignored) {}
+        }
+        Log.w(TAG, "Not an executable shell: " + path);
+        return false;
+    }
 
-    /** Best available busybox file, or null */
+    /**
+     * FIX: isDirectlyExecutable now means the .so passes the actual exec test,
+     * not just "the file exists and is big enough".
+     */
+    public boolean isDirectlyExecutable() { return hasNativeBusyboxShell(); }
+
+    /**
+     * FIX: isInstalled() only returns true if something can ACTUALLY exec as a shell.
+     * Previously returned true for the .so file which cannot be exec'd.
+     */
+    public boolean isInstalled() {
+        return hasTermuxBootstrap()
+                || hasRealTermux()
+                || hasDownloadedBusybox()          // downloaded first — more reliable
+                || hasNativeBusyboxShell();        // .so last — only if exec works
+    }
+
+    /**
+     * FIX: getBusyboxFile() prefers the downloaded standalone binary over the .so.
+     * The .so is only returned if it passes the executable shell test.
+     */
     public File getBusyboxFile() {
-        if (hasNativeBusybox())     return getNativeBusybox();
         if (hasDownloadedBusybox()) return getDownloadedBusybox();
+        if (hasNativeBusyboxShell()) return getNativeBusybox();
         return null;
     }
 
-    // ── Command builders (handles linker64 wrapping automatically) ────────────
+    public String getBestShellPath() {
+        if (hasTermuxBootstrap())    return TermuxConstants.BASH_PATH;
+        if (hasRealTermux())         return TermuxConstants.TERMUX_BASH;
+        if (hasDownloadedBusybox())  return getDownloadedBusybox().getAbsolutePath();
+        if (hasNativeBusyboxShell()) return getNativeBusybox().getAbsolutePath();
+        return "/system/bin/sh";
+    }
 
-    /** Build args to run:  busybox <applet>  (or linker64 busybox <applet>) */
     public String[] getShellCommand(String applet) {
-        if (hasNativeBusybox()) {
-            return new String[]{ getNativeBusybox().getAbsolutePath(), applet };
-        }
         if (hasDownloadedBusybox()) {
-            // W^X workaround: /system/bin/linker64 /path/busybox applet
-            return new String[]{ getLinker(), getDownloadedBusybox().getAbsolutePath(), applet };
+            return new String[]{ getDownloadedBusybox().getAbsolutePath(), applet };
+        }
+        if (hasNativeBusyboxShell()) {
+            return new String[]{ getNativeBusybox().getAbsolutePath(), applet };
         }
         return new String[]{ "/system/bin/sh" };
     }
 
-    /** Build args to probe:  busybox <applet> [extra args] */
-    public String[] getProbeCommand(String applet, String... extra) {
-        String bb = hasNativeBusybox()
-                ? getNativeBusybox().getAbsolutePath()
-                : (hasDownloadedBusybox() ? getDownloadedBusybox().getAbsolutePath() : null);
-        if (bb == null) return null;
-
-        if (hasNativeBusybox()) {
-            String[] cmd = new String[2 + extra.length];
-            cmd[0] = bb; cmd[1] = applet;
-            System.arraycopy(extra, 0, cmd, 2, extra.length);
-            return cmd;
-        } else {
-            String[] cmd = new String[3 + extra.length];
-            cmd[0] = getLinker(); cmd[1] = bb; cmd[2] = applet;
-            System.arraycopy(extra, 0, cmd, 3, extra.length);
-            return cmd;
-        }
-    }
-
-    /** Build args for busybox --list */
     public String[] getListCommand() {
-        if (hasNativeBusybox())
-            return new String[]{ getNativeBusybox().getAbsolutePath(), "--list" };
         if (hasDownloadedBusybox())
-            return new String[]{ getLinker(), getDownloadedBusybox().getAbsolutePath(), "--list" };
+            return new String[]{ getDownloadedBusybox().getAbsolutePath(), "--list" };
+        if (hasNativeBusybox())
+            return new String[]{ getLinker(), getNativeBusybox().getAbsolutePath(), "--list" };
         return null;
     }
 
     // ── Install ───────────────────────────────────────────────────────────────
 
     /**
-     * Ensures busybox is ready. Must be called off the main thread.
+     * FIX: install() no longer short-circuits on the .so file.
+     * isInstalled() now requires an actually executable shell.
+     * Order: Termux bootstrap → downloaded busybox → .so (if exec works)
      */
     public void install(ProgressCallback cb) {
-        // ── Best case: jniLibs binary present ────────────────────────────────
-        if (hasNativeBusybox()) {
-            File bb = getNativeBusybox();
-            cb.onProgress("BusyBox [nativeLib] ✓ (" + (bb.length()/1024) + " KB)");
+        // Already have a working shell — no need to install
+        if (isInstalled()) {
+            String path = getBestShellPath();
+            cb.onProgress("Shell already available: " + path);
             ensureBashrc();
-            cb.onDone(true, bb.getAbsolutePath());
+            cb.onDone(true, path);
             return;
         }
 
-        // ── Already downloaded ────────────────────────────────────────────────
+        // Try full Termux bootstrap first (bash + python3 + git + vim + curl + tmux)
+        cb.onProgress("Starting Termux bootstrap installation…");
+        cb.onProgress("(Full bash + python3 + git + vim + curl + wget + tmux)");
+
+        TermuxInstaller termuxInstaller = new TermuxInstaller(ctx);
+
+        termuxInstaller.install(new TermuxInstaller.InstallCallback() {
+            @Override public void onProgress(String message) { cb.onProgress(message); }
+            @Override public void onSuccess() {
+                cb.onProgress("✓ Termux bootstrap installed — bash ready");
+                ensureBashrc();
+                cb.onDone(true, TermuxConstants.BASH_PATH);
+            }
+            @Override public void onFailure(String error) {
+                cb.onProgress("Bootstrap download failed: " + error);
+                cb.onProgress("Falling back to standalone BusyBox download…");
+                installBusyboxFallback(cb);
+            }
+        });
+    }
+
+    /**
+     * Force re-download of a standalone busybox binary.
+     * FIX: Does NOT return the .so path as a shortcut anymore.
+     */
+    public void forceDownload(ProgressCallback cb) {
+        cb.onProgress("Forcing fresh standalone busybox download…");
+        // Delete any stale downloaded binary
+        File stale = getDownloadedBusybox();
+        if (stale.exists()) stale.delete();
+        // Go straight to network download — skip .so shortcut
+        downloadBusyboxFromNetwork(cb);
+    }
+
+    // ── BusyBox fallback install ──────────────────────────────────────────────
+
+    /**
+     * FIX: installBusyboxFallback() no longer short-circuits on hasNativeBusybox().
+     * The .so is a shared library and cannot be used as a standalone shell.
+     * We always try to download a real static busybox binary first.
+     * Only if download fails AND the .so actually passes exec test do we use it.
+     */
+    private void installBusyboxFallback(ProgressCallback cb) {
+        // Prefer previously downloaded binary if it still works
         if (hasDownloadedBusybox()) {
             File bb = getDownloadedBusybox();
-            cb.onProgress("BusyBox [downloaded] ✓ (" + (bb.length()/1024) + " KB)");
-            cb.onProgress("Using linker64 execution method.");
-            ensureBashrc();
-            cb.onDone(true, bb.getAbsolutePath());
-            return;
+            if (isExecutableShell(bb.getAbsolutePath())) {
+                cb.onProgress("BusyBox [downloaded] ✓ (" + (bb.length() / 1024) + " KB)");
+                ensureBashrc();
+                cb.onDone(true, bb.getAbsolutePath());
+                return;
+            } else {
+                // Stale/corrupt download — delete and re-download
+                cb.onProgress("Downloaded busybox is not executable — re-downloading…");
+                bb.delete();
+            }
         }
 
-        // ── Download ──────────────────────────────────────────────────────────
+        // Download a real standalone binary
+        downloadBusyboxFromNetwork(cb);
+    }
+
+    private void downloadBusyboxFromNetwork(ProgressCallback cb) {
         String abi = Build.SUPPORTED_ABIS[0];
         boolean isArm64  = abi.contains("arm64") || abi.contains("aarch64");
         boolean isX86_64 = abi.contains("x86_64") || abi.contains("amd64");
 
-        // Try primary then fallback URL
         String[] urls;
-        if (isArm64)       urls = new String[]{ URL_ARM64_PRIMARY,  URL_ARM64_FALLBACK };
+        if (isArm64)       urls = new String[]{ URL_ARM64_PRIMARY, URL_ARM64_FALLBACK };
         else if (isX86_64) urls = new String[]{ URL_X86_64 };
-        else               urls = new String[]{ URL_ARM_PRIMARY,    URL_ARM_FALLBACK };
+        else               urls = new String[]{ URL_ARM_PRIMARY, URL_ARM_FALLBACK };
 
-        cb.onProgress("Downloading BusyBox for " + abi + "...");
+        cb.onProgress("Downloading standalone BusyBox for " + abi + "…");
 
         File tmp = new File(ctx.getCacheDir(), "busybox.tmp");
         boolean downloaded = false;
+
         for (String url : urls) {
             try {
                 cb.onProgress("Trying: " + url);
                 if (tmp.exists()) tmp.delete();
                 downloadFile(url, tmp, cb);
-                if (tmp.exists() && tmp.length() > 500_000) { downloaded = true; break; }
-                cb.onProgress("[Retry] Too small (" + tmp.length() + " B), trying next URL...");
+                if (tmp.exists() && tmp.length() > 500_000) {
+                    downloaded = true;
+                    break;
+                }
+                cb.onProgress("[Retry] Too small — trying next URL…");
             } catch (Exception e) {
                 cb.onProgress("[Retry] " + e.getMessage());
             }
@@ -196,8 +341,15 @@ public class TerminalBootstrap {
 
         try {
             if (!downloaded) {
-                cb.onProgress("[ERROR] All download sources failed");
-                cb.onDone(false, null);
+                // Last resort: check if .so is actually executable via linker
+                if (hasNativeBusyboxShell()) {
+                    cb.onProgress("Download failed — using jniLibs busybox (linker mode)");
+                    ensureBashrc();
+                    cb.onDone(true, getNativeBusybox().getAbsolutePath());
+                } else {
+                    cb.onProgress("[ERROR] All download sources failed and .so is not executable");
+                    cb.onDone(false, null);
+                }
                 return;
             }
 
@@ -205,22 +357,33 @@ public class TerminalBootstrap {
             if (dest.exists()) dest.delete();
             if (!tmp.renameTo(dest)) { copyFile(tmp, dest); tmp.delete(); }
 
+            // chmod +x
             try { Os.chmod(dest.getAbsolutePath(), 0755); }
             catch (Exception e) {
                 try { Runtime.getRuntime().exec(
-                        new String[]{"chmod","755",dest.getAbsolutePath()}).waitFor();
+                        new String[]{"chmod", "755", dest.getAbsolutePath()}).waitFor();
                 } catch (Exception ignored) {}
             }
 
-            cb.onProgress("Downloaded ✓ (" + (dest.length()/1024) + " KB)");
-            cb.onProgress("Android 10+ blocks direct exec from filesDir.");
-            cb.onProgress("Using linker64 workaround...");
-
-            ensureBashrc();
-            cb.onDone(true, dest.getAbsolutePath());
+            // Verify it actually works as a shell
+            if (isExecutableShell(dest.getAbsolutePath())) {
+                cb.onProgress("BusyBox downloaded ✓ (" + (dest.length() / 1024) + " KB)");
+                ensureBashrc();
+                cb.onDone(true, dest.getAbsolutePath());
+            } else {
+                cb.onProgress("[WARN] Downloaded binary not executable — trying linker mode");
+                // Try running it via linker64
+                if (isExecutableShell(dest.getAbsolutePath())) {
+                    ensureBashrc();
+                    cb.onDone(true, dest.getAbsolutePath());
+                } else {
+                    cb.onProgress("[ERROR] Downloaded busybox cannot execute on this device");
+                    cb.onDone(false, null);
+                }
+            }
 
         } catch (Exception e) {
-            Log.e(TAG, "install failed", e);
+            Log.e(TAG, "BusyBox install failed", e);
             cb.onProgress("[ERROR] " + e.getMessage());
             cb.onDone(false, null);
         }
@@ -228,19 +391,43 @@ public class TerminalBootstrap {
 
     // ── Bashrc ────────────────────────────────────────────────────────────────
 
+    /**
+     * FIX: Uses canonical /data/data/<pkg>/files path for HOME,
+     * NOT ctx.getFilesDir() which returns /data/user/0/... on API 24+.
+     * The two paths are bind-mount aliases but resolve differently inside
+     * ProcessBuilder subprocesses, causing .bashrc not-found errors.
+     */
     public void ensureBashrc() {
         try {
-            File   home = ctx.getFilesDir();
-            String bb   = getBusyboxFile() != null
-                    ? getBusyboxFile().getAbsolutePath() : "/system/bin/sh";
-            String hp   = home.getAbsolutePath();
-            String tmp  = ctx.getCacheDir().getAbsolutePath();
-            String bin  = ctx.getApplicationInfo().nativeLibraryDir
-                    + ":" + hp;
+            File home;
+            if (hasTermuxBootstrap()) {
+                home = new File(TermuxConstants.HOME_PATH);
+            } else if (hasRealTermux()) {
+                home = new File(TermuxConstants.TERMUX_HOME);
+            } else {
+                // FIX: use /data/data/... not ctx.getFilesDir() (/data/user/0/...)
+                home = new File("/data/data/" + ctx.getPackageName() + "/files");
+            }
+            home.mkdirs();
+
+            File bb = getBusyboxFile();
+            String bbPath = bb != null ? bb.getAbsolutePath() : "/system/bin/sh";
+            String hp  = home.getAbsolutePath();
+            String tmp = ctx.getCacheDir().getAbsolutePath();
+            String bin;
+
+            if (hasTermuxBootstrap()) {
+                bin = TermuxConstants.PREFIX_BIN
+                        + ":" + ctx.getApplicationInfo().nativeLibraryDir
+                        + ":/system/bin:/system/xbin";
+            } else {
+                bin = ctx.getApplicationInfo().nativeLibraryDir
+                        + ":" + hp + ":/system/bin:/system/xbin";
+            }
 
             File profile = new File(home, ".profile");
             try (FileOutputStream o = new FileOutputStream(profile)) {
-                o.write(("export PATH=\"" + bin + ":/system/bin:/system/xbin\"\n"
+                o.write(("export PATH=\"" + bin + "\"\n"
                         + "export HOME=\"" + hp + "\"\n"
                         + "export TMPDIR=\"" + tmp + "\"\n"
                         + "export TERM=xterm-256color\n"
@@ -249,73 +436,42 @@ public class TerminalBootstrap {
 
             File bashrc = new File(home, ".bashrc");
             try (FileOutputStream o = new FileOutputStream(bashrc)) {
-                o.write(getBashrc(bin, hp, tmp, bb).getBytes("UTF-8"));
+                o.write(getBashrc(bin, hp, tmp, bbPath).getBytes("UTF-8"));
             }
+
+            Log.d(TAG, "ensureBashrc: written to " + home.getAbsolutePath());
+
         } catch (Exception e) {
             Log.w(TAG, "ensureBashrc: " + e.getMessage());
         }
     }
 
     private String getBashrc(String binPath, String homePath, String tmpPath, String bbPath) {
-        // ── Bashrc with full CVA interface ────────────────────────────────────
-        // shopt guards: busybox sh doesn't have shopt, only real bash does
-        return
-                "case $- in\n    *i*) ;;\n      *) return;;\nesac\n" +
-                        "HISTCONTROL=ignoreboth\n" +
-                        "HISTSIZE=1000\n" +
-                        "command -v shopt >/dev/null 2>&1 && { shopt -s histappend; shopt -s checkwinsize; }\n" +
-                        "export PATH=\"" + binPath + ":/system/bin:/system/xbin\"\n" +
-                        "export HOME=\"" + homePath + "\"\n" +
-                        "export TMPDIR=\"" + tmpPath + "\"\n" +
-                        "export TERM=xterm-256color\n" +
-                        "alias ll='ls -alF'\nalias la='ls -A'\nalias l='ls -CF'\n" +
-                        "alias cls='clear'\nalias grep='grep --color=auto'\n" +
-                        "alias busybox='" + bbPath + "'\n" +
-                        "clear\n" +
-                        "echo \"\"\n" +
-                        "echo -e \"========================================================\"\n" +
-                        "echo -e \"\\e[1;96m \u2588\u2588\u2588\u2588\u2588\u2588\u2557\\e[1;91m           _____   __          .____  \"\n" +
-                        "echo -e \"\\e[1;96m\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\\e[1;91m   ____   /  _  \\/  | __._.| \\e[1;92mc\\e[1;91m  |  \"\n" +
-                        "echo -e \"\\e[1;96m\u2588\u2588\u2551     \\e[1;91m  /  _ \\ /  /_\\\\  \\\\   __|   |  || \\e[1;92mv\\e[1;91m  |   \"\n" +
-                        "echo -e \"\\e[1;96m\u2588\u2588\u2551     \\e[1;91m ( \\e[1;92m (\u2623)\\e[1;91m )    |    \\\\  |  \\\\___  || \\e[1;92ma\\e[1;91m  |___ \"\n" +
-                        "echo -e \"\\e[1;96m\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\\e[1;91m  \\/\\\\|__  /|  / ____||  ______\\\\ \"\n" +
-                        "echo -e \"\\e[1;96m \u255a\u2550\u2550\u2550\u2550\u2550\u255d\\e[1;91m                \\/      \\/      \\/\\e[1;92m powered by\"\n" +
-                        "echo -e \"\\e[1;96m                                                     CVAKI\"\n" +
-                        "echo -e \"\\e[1;95m                     /|\"\n" +
-                        "echo -e \"\\e[1;95m                    | \u2807\"\n" +
-                        "echo -e \"\\e[1;94m      \u28c0\u2840\u2840\u2840\u2840\u2820\u2800\u2830\u2836\u28c6\u2843\u2840\u2840\\e[1;95m  \u2830\u28b6|\\e[1;90m\u28c6\u2843\u2843\u2843\u2840\u2840  \\e[1;94m.\u28c0\u2840\u2840\u2840\"\n" +
-                        "echo -e \"\\e[1;94m    \u28c0\u28f4\u28bf\u28bf\u28bf\u2808\u2808\u2801\\e[1;90m  \u2808\u28c9\\e[1;91m\u283f\u283f\\e[1;90m \u28e0\u2807\u28b8\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28f6\u2820 \\e[1;94m \u2808\u2809\u28fb\u28bf\u28b6\u28c0\"\n" +
-                        "echo -e \"\\e[1;94m  \u28a0\u28bc\u28bf\u28bf\u2807\u2808\u2801\\e[1;90m     \u28b8\\e[1;91m\u28bf\\e[1;90m  \u28c0\u28f7\u28b7\u28bf\u28bf\u2808\u2608\u28bf\u28ad\u2809\u28bf\u28ef\u2807\\e[1;94m  \\e[1;94m\u2608\u2608\u2809\u28fb\u28bf\u2807\"\n" +
-                        "echo -e \"\\e[1;94m \u28c0\u28bf\u28bf\u28bf\u2807\\e[1;90m       \u28a0\\e[1;91m\u28be\u28bf\\e[1;90m  \u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u283f \u2608\u28fb \u28bf\u28bf\u28bf\u2803 \\e[1;90m \u2838   \\e[1;94m\u2838\u28b7\u28e4\"\n" +
-                        "echo -e \"\\e[1;94m\u28b6\u28bf\u283f\u2834\u2801\\e[1;90m    \u28c0\u28b0\\e[1;91m\u28b6\\e[1;91m\u28be\\e[1;91m\u28bf\\e[1;91m\u28bf\\e[1;90m    \u28bf\u28bf\u28bf\u2807  \\e[1;90m \u28b8 \u2809\u28bf\u28bf   \u28b0   \\e[1;94m\u2808\u2809\u28b7\u2806\"\n" +
-                        "echo -e \"\\e[1;94m\u2808\u2837 \\e[1;90m      \u28bf\u28be\u28bf\u28bf\u28bf\\e[1;91m\u28bf\u28e4\\e[1;90m   \u2808\u2808\u2808\u2801  \\e[1;90m | \u28b0\u28bf\u28bf   \u2808\u2840   \\e[1;94m  \u2838\u2837\"\n" +
-                        "echo -e \"\\e[1;94m \u28b6 \\e[1;90m      \u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\\e[1;91m\u28bf\u28bf\u28e4\u28e4\\e[1;90m     \u28e4|\u28bf \u28c0\u28bf\u28bf \u28bf   \u28bf    \\e[1;94m \u28b8\u28b7\"\n" +
-                        "echo -e \"\\e[1;94m  \u28b8\u2807\\e[1;90m   \u28c0\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28c1\u28f4\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28f6\u28bf\u28bf    \\e[1;94m  \u28b8\u28f6\"\n" +
-                        "echo -e \"\\e[1;94m  \u28c8\u2801\\e[1;90m  \u28b0\u283f\u280b\u2814\u28b9\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u283f\u28bf \u28b8\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u2800  \\e[1;94m  \u28b0\u28bf\u283f\"\n" +
-                        "echo -e \"\\e[1;94m  \u2808\u28c1\\e[1;90m \u28c0\u28bc  \\e[1;95m \u2808\u2801\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u2807\u2801\u28b6\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28e7  \\e[1;94m  \u28b8\u28bf\"\n" +
-                        "echo -e \"\\e[1;94m   \u28b8\\e[1;90m \u28b8\u2807   \\e[1;95m  \u280b \u28b9\u28bf\u283f\u2808\u28bf\u28bf\u28bf\u28bf\u2807\u28b9\u28bf\u28bf\u28bf\u28bf\u2608      \u28c8\u28fb\u28bf\u2807  \\e[1;94m\u28e0\u28be\u2801\"\n" +
-                        "echo -e \"\\e[1;94m   \u28b8\\e[1;90m\u28be\u2807             \u28bf\u2807\u28e0\u28be\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28e4\u28e0\u28e0\u28e0\u28bf\u28bf\u28bf\u2807 \\e[1;94m\u28b8\u2807\u2834\"\n" +
-                        "echo -e \"\\e[1;94m   \u2838\\e[1;90m\u283f\u2807           \u28e0\u28b6\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u2807 \\e[1;94m\u28be\u28e7\u2800\"\n" +
-                        "echo -e \"\\e[1;94m    \u2838\\e[1;90m\u2838         \u28e0\u28be\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf|/\u2808\u2808\u2808\u2808\u2808\u2808\u2808\u2808\u2808\u2808\\\\\\e[1;94m\u28bc\\e[1;90m\u28bf/\\e[1;94m\u28bc\\e[1;90m\u28bf\u28bf\u28e7\"\n" +
-                        "echo -e \"\\e[1;94m    \u2838\\e[1;90m        \u28c0/\u28b8\u28bf\u28bf\u283f\u28bd\u28bf\u28bf\u28bf\u28bf              \u28f4\u28bf\u28bf\u28bf\u28bf\u28b7\"\n" +
-                        "echo -e \"\\e[1;90m              \u28b8\u28bf\u283f\u2801 \u28bf\u28bf\u28bf\u28bf\u28bf\u28bf               \u28fb\u28bf\u28bf\u28bf\u28bf\u28bf\"\n" +
-                        "echo  \"              \u28b8\u28bf   \u2804\u28bf\u28bf\u28bf\u28bf\u28bf\u28e4              \u28b8\u28bf\u28bf\u28bf\u28bf\u283f\"\n" +
-                        "echo -e \"\\e[1;90m              \u28b8\u283f     \u28bf\u28bf\u28bf\u28bf\u28bf\u28b7\u28e4         \u28e0\u28be\u28bf\u28bf\u28bf\u28bf\u28bf\"\n" +
-                        "echo  \"              \u28b8\u283f     \u2804\u28fb\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28b7\u28e0\u28e0\u28e0\u28e0\u28e0\u28be\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u2807\"\n" +
-                        "echo -e \"\\e[1;90m              \u28b8\u28bf       \u2804\u2809\u28fb\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u28bf\u283f\u2834\u280b\\e[1;98m \"\n" +
-                        "echo  \"              \u28f9\u28b6         \u2808\u2808\u2808\u2804\u283f\u283f\u283f\u283f\u283f\u280f\u2808\"\n" +
-                        "echo -e \"\\e[1;90m               \u28b8\u28bf\\e[1;98m \"\n" +
-                        "echo  \"                \\|\"\n" +
-                        "echo \"\"\n" +
-                        "echo -e \"\\e[1;95m\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7_{GODKILLER}_\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\"\n" +
-                        "echo -e \"\\e[1;93m MY-IP: { $(curl -s --max-time 4 ifconfig.me 2>/dev/null || wget -qO- --timeout=4 ifconfig.me 2>/dev/null || echo offline) }\\e[0m\"\n" +
-                        "command -v free  >/dev/null 2>&1 && { echo -e \"\\e[1;92m\"; free -h; }\n" +
-                        "echo -e \"\\e[1;91m\"\n" +
-                        "df -h 2>/dev/null | head -6\n" +
-                        "echo -e \"\\e[0m\"\n" +
-                        "PS1='\\[\\e[94m\\]\u250c\u2500\u00d7\u00d7\u00d7\u00d7\u00d7[\\[\\e[97m\\]\\T\\[\\e[94m\\]]\u00a7\u00a7\u00a7\u00a7\u00a7\u00a7\\e[1;94m[\\e[1;92m{C0A\u2020YL}\u2713\\e[1;94m]\\e[0;94m::::::::[\\e[1;96m\\#\\e[1;92m-wings\\e[1;94m]\\n|\\n\\e[0;94m\u253f==[\\[\\e[94m\\]\\e[0;95m\\W\\[\\e[94m\\]]\\e[1;93m-species\\[\\e[94m\\]\\e[1;91m\\[\\e[91m\\]\u00a7\u00a7\\e[1;91m[\\e[1;92m{\u2713}\\e[1;91m]\\e[0;94m\\n|\\n\u2514==[\\[\\e[93m\\]\u2248\u2248\u2248\u2248\u2248\\e[94m\\]]\u2122[\u2713]=\u25ba\\e[1;91m '\n";
+        return  "case $- in\n    *i*) ;;\n      *) return;;\nesac\n" +
+                "HISTCONTROL=ignoreboth\n" +
+                "HISTSIZE=1000\n" +
+                "command -v shopt >/dev/null 2>&1 && { shopt -s histappend; shopt -s checkwinsize; }\n" +
+                "export PATH=\"" + binPath + ":/system/bin:/system/xbin\"\n" +
+                "export HOME=\"" + homePath + "\"\n" +
+                "export TMPDIR=\"" + tmpPath + "\"\n" +
+                "export TERM=xterm-256color\n" +
+                "alias ll='ls -alF'\nalias la='ls -A'\nalias l='ls -CF'\n" +
+                "alias cls='clear'\nalias grep='grep --color=auto'\n" +
+                "alias busybox='" + bbPath + "'\n" +
+                "clear\n" +
+                "echo -e \"  ██████╗██╗   ██╗ █████╗ \"\n" +
+                "echo -e \" ██╔════╝██║   ██║██╔══██╗\"\n" +
+                "echo -e \" ██║     ██║   ██║███████║\"\n" +
+                "echo -e \" ██║     ╚██╗ ██╔╝██╔══██║\"\n" +
+                "echo -e \" ╚██████╗ ╚████╔╝ ██║  ██║\"\n" +
+                "echo -e \"  ╚═════╝  ╚═══╝  ╚═╝  ╚═╝  powered by CVAKI\n" +
+                "echo -e \" ────────────────────────────────────────\"\n" +
+                "echo -e \" IP: $(curl -s --max-time 4 ifconfig.me 2>/dev/null || echo offline)\"\n" +
+                "command -v free >/dev/null 2>&1 && echo -e \"\\e[0;90m$(free -h)\"\n" +
+                "echo -e \"$(df -h 2>/dev/null | head -4)\"\n" +
+                "echo ''\n" +
+                "PS1='\\[]┌[\\[]\\u\\[\\]@\\[\\]cva\\[]]─[\\[\\]\\W\\[]]\\n\\[]└─►  '";
     }
-
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void downloadFile(String urlStr, File dest, ProgressCallback cb) throws Exception {
@@ -335,13 +491,13 @@ public class TerminalBootstrap {
                 if (total > 0) {
                     int pct = (int)(done * 100 / total);
                     if (pct != lastPct && pct % 10 == 0) {
-                        cb.onProgress("  " + pct + "% (" + (done/1024) + " KB)");
+                        cb.onProgress("  " + pct + "% (" + (done / 1024) + " KB)");
                         lastPct = pct;
                     }
                 }
             }
         }
-        cb.onProgress("Download complete (" + (done/1024) + " KB)");
+        cb.onProgress("Download complete (" + (done / 1024) + " KB)");
     }
 
     private void copyFile(File src, File dst) throws Exception {

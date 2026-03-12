@@ -36,6 +36,10 @@ public class ScreenCapturePermissionActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // Suppress enter animation — this activity has no UI of its own; we
+        // don't want a flash of the window background before the system dialog appears.
+        overridePendingTransition(0, 0);
+
         task     = getIntent().getStringExtra("task");
         apiKey   = getIntent().getStringExtra("apiKey");
         provider = getIntent().getStringExtra("provider");
@@ -75,6 +79,14 @@ public class ScreenCapturePermissionActivity extends Activity {
                     "Screen capture denied — CVA needs this to read your screen",
                     Toast.LENGTH_LONG).show();
         }
+
+        // moveTaskToBack() keeps whatever app was in the foreground visible
+        // instead of letting Android surface MainActivity when we finish().
+        // This is the key fix: the permission dialog closed → user stays exactly
+        // where they were (e.g. in their browser / chat app).
+        moveTaskToBack(true);
         finish();
+        // Suppress the exit animation so there is no visible transition to MainActivity.
+        overridePendingTransition(0, 0);
     }
 }

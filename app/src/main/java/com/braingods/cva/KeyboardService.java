@@ -22,6 +22,7 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Switch;
 import android.widget.Toast;
 
 import java.util.concurrent.ExecutorService;
@@ -57,6 +58,7 @@ public class KeyboardService extends InputMethodService {
 
     // ── Terminal ─────────────────────────────────────────────────────────────
     private TerminalManager terminalManager;
+    private DoctorPanelController doctorPanel;
     private TextView  tvTermOut;
     private ScrollView svTermOut;
     private View      termSlideKb;
@@ -108,7 +110,7 @@ public class KeyboardService extends InputMethodService {
         terminalManager = new TerminalManager(this, chunk -> ui.post(() -> {
             tvTermOut.append(chunk);
             svTermOut.post(() -> svTermOut.fullScroll(ScrollView.FOCUS_DOWN));
-            if (autoImportOn) pushChunkToCursor(chunk);
+            if (autoImportOn) pushChunkToCursor(chunk.toString());
         }));
 
         SharedPreferences prefs = getSharedPreferences("cva_prefs", Context.MODE_PRIVATE);
@@ -122,6 +124,18 @@ public class KeyboardService extends InputMethodService {
         }
         brainAgent = new BrainAgent(provider, activeKey, this);
         brainAgent.setTerminalManager(terminalManager);
+
+        // Give the doctor panel the AI brain so it can run AI-powered fixes
+        if (doctorPanel != null) doctorPanel.setBrainAgent(brainAgent);
+
+        // Wire doctor panel to TerminalManager now that terminalManager exists
+        terminalManager.setDoctorCallback((mode) -> ui.post(() -> {
+            if (doctorPanel != null) {
+                Switch sw = sectionTerminal.findViewById(R.id.btn_doctor_toggle);
+                if (sw != null) sw.setChecked(true);
+                doctorPanel.showAndRun(mode);
+            }
+        }));
         // agentCallback: while running → update the status ticker only.
         // Final answer (isRunning=false) → add the reply bubble exactly ONCE here.
         // sendBrainMsg() adds the user bubble + thinking bubble only.
@@ -450,11 +464,21 @@ public class KeyboardService extends InputMethodService {
         tvTermOut      = sectionTerminal.findViewById(R.id.tv_terminal_output);
         svTermOut      = sectionTerminal.findViewById(R.id.sv_terminal_output);
         tvTermInputLine= sectionTerminal.findViewById(R.id.tv_term_input_line);
+        if (tvTermInputLine != null) {
+            tvTermInputLine.setTextColor(Color.parseColor("#C8F0D5"));   // doctor COL_TEXT
+            tvTermInputLine.setBackgroundColor(Color.parseColor("#030D06"));
+            tvTermInputLine.setTypeface(android.graphics.Typeface.MONOSPACE);
+        }
         termSlideKb    = sectionTerminal.findViewById(R.id.terminal_slide_keyboard);
 
-        tvTermOut.setTextColor(Color.parseColor("#FF8C42"));  // orange terminal output
-        tvTermOut.setBackgroundColor(Color.BLACK);
+        // ── Terminal output — match Doctor panel dark-green theme ────────────
+        tvTermOut.setTextColor(Color.parseColor("#00FF6A"));        // doctor COL_PRIMARY green
+        tvTermOut.setBackgroundColor(Color.parseColor("#020805"));  // doctor COL_BG near-black
         tvTermOut.setTypeface(android.graphics.Typeface.MONOSPACE);
+        tvTermOut.setTextSize(12f);
+        tvTermOut.setPadding(dp(6), dp(4), dp(6), dp(4));
+        // ScrollView bg to match
+        svTermOut.setBackgroundColor(Color.parseColor("#020805"));
 
         // Build keyboard immediately — it is always visible
         buildTerminalKeyboard();
@@ -526,12 +550,14 @@ public class KeyboardService extends InputMethodService {
         Button btnRestart = sectionTerminal.findViewById(R.id.btn_term_restart);
         if (btnRestart != null) {
             btnRestart.setOnClickListener(v -> {
+                tvTermOut.setTextColor(Color.parseColor("#FFD600"));
                 tvTermOut.setText("[Restarting shell...] ");
                 termBuf.setLength(0);
                 updateTermInputLine();
                 terminalManager.restart();
             });
             btnRestart.setOnLongClickListener(v -> {
+                tvTermOut.setTextColor(Color.parseColor("#FFD600"));
                 tvTermOut.setText("[Re-downloading BusyBox...] ");
                 termBuf.setLength(0);
                 updateTermInputLine();
@@ -541,7 +567,21 @@ public class KeyboardService extends InputMethodService {
         }
 
         tvTermOut.setText("CVA Terminal v1.0\n$ ");
+        tvTermOut.setTextColor(Color.parseColor("#00FF6A"));
         updateTermInputLine();
+
+        // ── Doctor Panel — inline, no separate Activity ──────────────────────
+        doctorPanel = new DoctorPanelController(this, sectionTerminal, null);
+
+        // Wire the ⚕ switch — Switch is already in keyboard_terminal.xml
+        Switch doctorSwitch = sectionTerminal.findViewById(R.id.btn_doctor_toggle);
+        if (doctorSwitch != null) {
+            doctorSwitch.setOnCheckedChangeListener((sw, isChecked) -> {
+                if (isChecked) doctorPanel.show(); else doctorPanel.hide();
+            });
+        }
+
+
     }
 
     private static final String[][] TERM_ROWS = {
@@ -634,20 +674,18 @@ public class KeyboardService extends InputMethodService {
             }
             case "↵" -> {
                 String cmd = termBuf.toString().trim();
-                tvTermOut.append(cmd + "\n");
+                // Show the typed command in the output view (bash has no PTY echo)
+                if (!cmd.isEmpty()) tvTermOut.append("$ " + cmd + "\n");
                 termBuf.setLength(0);
                 updateTermInputLine();
                 if (cmd.equalsIgnoreCase("clear")) {
                     clearTermAndCursor();
-                } else if (!cmd.isEmpty()) {
-                    terminalManager.executeCommand(cmd, output -> ui.post(() -> {
-                        tvTermOut.append(output + "\n$ ");
-                        updateTermInputLine();
-                        importTermToCursor(); // auto-import if toggle is ON
-                    }));
                 } else {
-                    tvTermOut.append("$ ");
-                    updateTermInputLine();
+                    // FIX: each character was already sent to bash's stdin line-buffer
+                    // via sendInput(c) as the user typed. executeCommand() would send
+                    // the full word again → bash sees  l + s + ls\n = "lsls\n".
+                    // Just send the newline to execute what's already buffered.
+                    terminalManager.sendInput("\n");
                 }
             }
             case "SHF"  -> { isShiftOn = !isShiftOn; }
@@ -682,6 +720,7 @@ public class KeyboardService extends InputMethodService {
 
     private void clearTermAndCursor() {
         tvTermOut.setText("CVA Terminal v1.0\n$ ");
+        tvTermOut.setTextColor(Color.parseColor("#00FF6A"));
         termBuf.setLength(0);
         // Backspace-clear the active cursor field too
         InputConnection ic = getCurrentInputConnection();
@@ -932,7 +971,12 @@ public class KeyboardService extends InputMethodService {
             // Launch the screen-capture permission activity (starts SmartOverlayService)
             android.content.Intent intent = new android.content.Intent(
                     this, ScreenCapturePermissionActivity.class);
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            // FLAG_ACTIVITY_NO_HISTORY       → activity is never added to the back stack,
+            //                                  so finish() returns to the caller app, not MainActivity.
+            // FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS → keeps it out of the Recents screen.
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                    | android.content.Intent.FLAG_ACTIVITY_NO_HISTORY
+                    | android.content.Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
             intent.putExtra("task",     task);
             intent.putExtra("apiKey",   apiKey);
             intent.putExtra("provider", provider);
@@ -941,7 +985,7 @@ public class KeyboardService extends InputMethodService {
         } else {
             // ── Stop the overlay service ─────────────────────────────────────
             stopService(new android.content.Intent(this, SmartOverlayService.class));
-            addBubble("[🧠]:: Parasite Killed..", false);
+            addBubble("[☠]:: Parasite Killed..", false);
         }
     }
 
@@ -953,18 +997,94 @@ public class KeyboardService extends InputMethodService {
         updateBrainInput();
         svBrainOut.post(() -> svBrainOut.fullScroll(ScrollView.FOCUS_DOWN));
 
-        // ── If Screen-Agent is ON, also update the overlay task ────────────────
-        if (brainSwitchOn) {
-            android.content.Intent update = new android.content.Intent(
-                    this, SmartOverlayService.class);
-            update.putExtra("task", msg);
-            startService(update);  // onStartCommand just calls setTask() for re-sends
+        // ── Route to the right agent ────────────────────────────────────────
+        //
+        //  DEVICE-ACTION TASK (open app / take photo / search / navigate):
+        //    → TaskAllocationActivity: breaks it into subtasks, tries terminal
+        //      first (BrainAgent), escalates to visual parasite on failure.
+        //      This is the path that was previously missing, causing the
+        //      "I don't have permissions" dead-end.
+        //
+        //  CONVERSATIONAL QUERY (ask me something / calculate / explain):
+        //    → BrainAgent.chat() directly (no screen access needed).
+        //
+        if (isDeviceActionTask(msg)) {
+            // ── TaskAllocationActivity path ──────────────────────────────────
+            addBubble("[⛕]::Task allocator…", false);
+
+            // If Screen-Agent is also ON, also push the task to SmartOverlayService
+            // so the parasite is already armed with a description before it starts.
+            if (brainSwitchOn) {
+                android.content.Intent update = new android.content.Intent(
+                        this, SmartOverlayService.class);
+                update.putExtra("task", msg);
+                startService(update);
+            }
+
+            TaskAllocationActivity.launch(this, msg);
+
+        } else {
+            // ── Pure BrainAgent conversational path ──────────────────────────
+            // If Screen-Agent is ON, also update the overlay task
+            if (brainSwitchOn) {
+                android.content.Intent update = new android.content.Intent(
+                        this, SmartOverlayService.class);
+                update.putExtra("task", msg);
+                startService(update);
+            }
+            // brainAgent.chat() fires agentCallback on every step.
+            // The final bubble is added by agentCallback (isRunning=false).
+            exec.execute(() -> brainAgent.chat(msg));
+        }
+    }
+
+    /**
+     * Heuristic: does this message look like a device-action task
+     * that needs terminal commands or visual UI navigation?
+     *
+     * Returns true for: "open camera", "search google", "take a photo",
+     * "play music", "call mom", "go to settings", etc.
+     * Returns false for pure conversation: "what is 2+2", "tell me a joke".
+     */
+    private static boolean isDeviceActionTask(String msg) {
+        if (msg == null || msg.trim().isEmpty()) return false;
+        String lower = msg.toLowerCase().trim();
+
+        // Action verb prefixes
+        String[] actionVerbs = {
+                "open ", "launch ", "start ", "take ", "capture ",
+                "search ", "find ", "look up ", "google ",
+                "navigate to ", "go to ", "show me ", "bring up ",
+                "play ", "pause ", "stop ", "call ", "dial ",
+                "text ", "send ", "share ", "upload ",
+                "download ", "install ", "uninstall ",
+                "turn on ", "turn off ", "enable ", "disable ",
+                "set ", "change ", "update ", "delete ", "remove ",
+                "create ", "make ", "record ", "scan ",
+                "connect ", "disconnect ", "pair "
+        };
+        for (String verb : actionVerbs) {
+            if (lower.startsWith(verb)) return true;
         }
 
-        // brainAgent.chat() fires agentCallback on every step.
-        // The final bubble is added by agentCallback (isRunning=false) above.
-        // chat() returns null when agentCallback is set — do NOT call addBubble(resp).
-        exec.execute(() -> brainAgent.chat(msg));
+        // Device-related nouns anywhere in short messages (≤ 8 words)
+        String[] deviceNouns = {
+                "camera", "photo", "picture", "screenshot",
+                "settings", "wifi", "bluetooth", "flashlight",
+                "volume", "brightness", "alarm", "timer",
+                "calendar", "contact", "message", "email",
+                "browser", "chrome", "youtube", "spotify",
+                "maps", "whatsapp", "instagram", "twitter",
+                "app ", "application"
+        };
+        int wordCount = lower.split("\\s+").length;
+        if (wordCount <= 8) {
+            for (String noun : deviceNouns) {
+                if (lower.contains(noun)) return true;
+            }
+        }
+
+        return false;
     }
 
     /** Add a chat bubble. isUser=true → right/orange. isUser=false → left/dark.
@@ -1049,9 +1169,27 @@ public class KeyboardService extends InputMethodService {
 
     private void updateTermInputLine() {
         if (tvTermInputLine == null) return;
-        String display = "$ " + termBuf.toString() + "█";
-        tvTermInputLine.setText(display);
-        // Also auto-scroll output
+        // Styled prompt: dim "$ ", green text, bright block cursor
+        android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder();
+        // "$ " in dim green
+        int start = 0;
+        sb.append("$ ");
+        sb.setSpan(new android.text.style.ForegroundColorSpan(
+                        android.graphics.Color.parseColor("#446650")), start, sb.length(),
+                android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        // typed text in bright green
+        start = sb.length();
+        sb.append(termBuf.toString());
+        sb.setSpan(new android.text.style.ForegroundColorSpan(
+                        android.graphics.Color.parseColor("#00FF6A")), start, sb.length(),
+                android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        // cursor █ in primary green
+        start = sb.length();
+        sb.append("█");
+        sb.setSpan(new android.text.style.ForegroundColorSpan(
+                        android.graphics.Color.parseColor("#00FF6A")), start, sb.length(),
+                android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        tvTermInputLine.setText(sb);
         if (svTermOut != null)
             svTermOut.post(() -> svTermOut.fullScroll(ScrollView.FOCUS_DOWN));
     }
@@ -1099,6 +1237,7 @@ public class KeyboardService extends InputMethodService {
     }
 
     /** @deprecated use updateAgentStatusTicker — kept so any existing XML/reflection refs compile */
+    @Deprecated
     private void showAgentStatus(String msg) {
         updateAgentStatusTicker(msg, true);
     }

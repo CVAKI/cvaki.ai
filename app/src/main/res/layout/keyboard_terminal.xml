@@ -5,10 +5,12 @@
     android:orientation="vertical"
     android:background="#000000">
 
-    <!-- ── Top bar ────────────────────────────────────────────────────────── -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!--  TOP BAR                                                                -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="28dp"
+        android:layout_height="30dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="#001A00">
@@ -23,53 +25,28 @@
             android:textColor="#00FF41"
             android:textSize="9sp"
             android:gravity="center_vertical"
-            android:paddingStart="8dp"
+            android:paddingStart="10dp"
             android:fontFamily="monospace"/>
 
-        <!-- Reset button -->
-        <Button
-            android:id="@+id/btn_term_restart"
-            android:layout_width="56dp"
-            android:layout_height="match_parent"
-            android:text="↺"
-            android:textSize="14sp"
-            android:textColor="#AAAAAA"
-            android:background="#0A1A0A"
-            android:padding="0dp"
-            android:stateListAnimator="@null"/>
-
-        <!-- Toggle output height -->
-        <Button
-            android:id="@+id/btn_toggle_output"
-            android:layout_width="64dp"
-            android:layout_height="match_parent"
-            android:text="▲ Out"
-            android:textSize="9sp"
-            android:textColor="#000000"
-            android:background="#00FF41"
-            android:padding="0dp"
-            android:stateListAnimator="@null"/>
-
-        <!-- LIVE toggle switch — right side, glows green when ON -->
+        <!-- LIVE toggle -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:paddingStart="6dp"
-            android:paddingEnd="6dp"
-            android:background="#001200">
+            android:paddingEnd="4dp">
 
             <TextView
                 android:id="@+id/tv_live_label"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="LIVE"
-                android:textColor="#444444"
+                android:textColor="#2A4030"
                 android:textSize="8sp"
-                android:letterSpacing="0.2"
+                android:letterSpacing="0.15"
                 android:fontFamily="monospace"
-                android:layout_marginEnd="4dp"/>
+                android:layout_marginEnd="3dp"/>
 
             <Switch
                 android:id="@+id/switch_live_import"
@@ -77,16 +54,74 @@
                 android:layout_height="wrap_content"
                 android:showText="false"
                 android:checked="false"
-                android:thumbTint="#444444"
-                android:trackTint="#1A1A1A"
-                android:scaleX="0.85"
-                android:scaleY="0.85"/>
+                android:thumbTint="#2A4030"
+                android:trackTint="#0A1A0A"
+                android:scaleX="0.82"
+                android:scaleY="0.82"/>
+        </LinearLayout>
+
+        <!-- Toggle output height -->
+        <Button
+            android:id="@+id/btn_toggle_output"
+            android:layout_width="54dp"
+            android:layout_height="match_parent"
+            android:text="▲ Out"
+            android:textSize="8.5sp"
+            android:textColor="#000000"
+            android:background="#00FF41"
+            android:padding="0dp"
+            android:fontFamily="monospace"
+            android:stateListAnimator="@null"/>
+
+        <!-- Reset button -->
+        <Button
+            android:id="@+id/btn_term_restart"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:text="↺"
+            android:textSize="14sp"
+            android:textColor="#888888"
+            android:background="#0A1A0A"
+            android:padding="0dp"
+            android:stateListAnimator="@null"/>
+
+        <!-- ⚕ DOCTOR TOGGLE — switch shows/hides the doctor section below -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#030D05"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚕"
+                android:textSize="12sp"
+                android:textColor="#446650"
+                android:fontFamily="monospace"
+                android:layout_marginEnd="3dp"/>
+
+            <Switch
+                android:id="@+id/btn_doctor_toggle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:showText="false"
+                android:checked="false"
+                android:thumbTint="#446650"
+                android:trackTint="#0A1A0A"
+                android:scaleX="0.82"
+                android:scaleY="0.82"/>
 
         </LinearLayout>
 
     </LinearLayout>
 
-    <!-- ── Output panel (collapsible) ────────────────────────────────────── -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!--  TERMINAL OUTPUT PANEL                                                  -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <ScrollView
         android:id="@+id/sv_terminal_output"
         android:layout_width="match_parent"
@@ -107,7 +142,9 @@
 
     </ScrollView>
 
-    <!-- ── Input line ─────────────────────────────────────────────────────── -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!--  INPUT LINE                                                             -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="28dp"
@@ -131,7 +168,257 @@
 
     </LinearLayout>
 
-    <!-- ── Always-visible terminal keyboard ──────────────────────────────── -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!--  ⚕  DOCTOR SECTION — hidden until btn_doctor_toggle is pressed         -->
+    <!--  Controller: DoctorPanelController.java                                 -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <LinearLayout
+        android:id="@+id/doctor_section_panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#020805"
+        android:visibility="gone">
+
+        <!-- ── Doctor header bar ─────────────────────────────────────────── -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="32dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#050F08"
+            android:paddingStart="12dp"
+            android:paddingEnd="10dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="⚕  CVA · TERMINAL DOCTOR  v3.0"
+                android:textColor="#00FF6A"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"/>
+
+            <!-- Live status pill -->
+            <TextView
+                android:id="@+id/tv_doctor_status"
+                android:layout_width="wrap_content"
+                android:layout_height="20dp"
+                android:text="● IDLE"
+                android:textColor="#446650"
+                android:textSize="8.5sp"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:background="#0A1A0D"/>
+
+        </LinearLayout>
+
+        <!-- ── 1px separator ─────────────────────────────────────────────── -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1px"
+            android:background="#0A2010"/>
+
+        <!-- ── Step chips strip ──────────────────────────────────────────── -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="26dp"
+            android:background="#030D05"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/doctor_chips_row"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <!-- Chips are added programmatically by DoctorPanelController -->
+
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- ── Progress bar (3dp tall) ───────────────────────────────────── -->
+        <ProgressBar
+            android:id="@+id/doctor_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="3dp"
+            android:max="8"
+            android:progress="0"
+            android:progressTint="#00FF6A"
+            android:progressBackgroundTint="#030D05"/>
+
+        <!-- ── Log output area ───────────────────────────────────────────── -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="180dp"
+            android:background="#050F08">
+
+            <!-- Left gutter accent -->
+            <View
+                android:layout_width="3dp"
+                android:layout_height="match_parent"
+                android:background="#0A2010"
+                android:layout_gravity="start"/>
+
+            <ScrollView
+                android:id="@+id/sv_doctor_log"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#050F08"
+                android:scrollbars="vertical">
+
+                <TextView
+                    android:id="@+id/tv_doctor_log"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="#C8F0D5"
+                    android:textSize="10sp"
+                    android:fontFamily="monospace"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:textIsSelectable="true"
+                    android:lineSpacingExtra="1dp"/>
+
+            </ScrollView>
+
+            <!-- Byte counter overlay (top-right) -->
+            <TextView
+                android:id="@+id/tv_doctor_bytes"
+                android:layout_width="wrap_content"
+                android:layout_height="18dp"
+                android:text="0 B"
+                android:textColor="#2A4030"
+                android:textSize="7.5sp"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:paddingStart="5dp"
+                android:paddingEnd="5dp"
+                android:layout_gravity="top|end"
+                android:layout_marginTop="3dp"
+                android:layout_marginEnd="6dp"
+                android:background="#0A1A0D"/>
+
+        </FrameLayout>
+
+        <!-- ── Current step status bar ───────────────────────────────────── -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="24dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#0A1A0D"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp">
+
+            <TextView
+                android:id="@+id/tv_doctor_cursor"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="▶"
+                android:textColor="#00FF6A"
+                android:textSize="8sp"
+                android:fontFamily="monospace"
+                android:layout_marginEnd="6dp"/>
+
+            <TextView
+                android:id="@+id/tv_doctor_step_label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="STANDBY — tap ⚕ RUN DOCTOR"
+                android:textColor="#446650"
+                android:textSize="9sp"
+                android:fontFamily="monospace"
+                android:singleLine="true"
+                android:ellipsize="end"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="◉"
+                android:textColor="#0A2010"
+                android:textSize="9sp"/>
+
+        </LinearLayout>
+
+        <!-- ── 1px separator ─────────────────────────────────────────────── -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1px"
+            android:background="#0A2010"/>
+
+        <!-- ── Action buttons bar ────────────────────────────────────────── -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:orientation="horizontal"
+            android:background="#030D05"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:gravity="center_vertical">
+
+            <!-- RUN DOCTOR -->
+            <Button
+                android:id="@+id/btn_doctor_run"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="2.2"
+                android:text="⚕  RUN DOCTOR"
+                android:textColor="#00FF6A"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:background="#0A1A0D"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:stateListAnimator="@null"
+                android:layout_marginEnd="4dp"/>
+
+            <!-- RESET -->
+            <Button
+                android:id="@+id/btn_doctor_reset"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="↺ RESET"
+                android:textColor="#FFD600"
+                android:textSize="9.5sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:background="#0A1A0D"
+                android:stateListAnimator="@null"
+                android:layout_marginEnd="4dp"/>
+
+            <!-- CLOSE PANEL -->
+            <Button
+                android:id="@+id/btn_doctor_close"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="0.7"
+                android:text="✕"
+                android:textColor="#FF3B3B"
+                android:textSize="12sp"
+                android:fontFamily="monospace"
+                android:background="#0A1A0D"
+                android:stateListAnimator="@null"/>
+
+        </LinearLayout>
+
+    </LinearLayout>
+    <!-- ── End Doctor Section ─────────────────────────────────────────────── -->
+
+    <!-- ── Terminal keyboard container (always visible) ─────────────────── -->
     <LinearLayout
         android:id="@+id/terminal_keyboard_container"
         android:layout_width="match_parent"
@@ -140,7 +427,7 @@
         android:background="#000814"
         android:padding="2dp"/>
 
-    <!-- Legacy stub — kept so existing code references don't break -->
+    <!-- Legacy stub — kept so existing code references compile -->
     <LinearLayout
         android:id="@+id/terminal_slide_keyboard"
         android:layout_width="match_parent"

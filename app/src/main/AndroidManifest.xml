@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.braingods.cva">
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- ── Core ─────────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -15,6 +15,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Wake lock (TerminalService) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 
     <!-- Accessibility (gesture injection) -->
     <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -39,7 +43,6 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="true"
@@ -48,9 +51,21 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar"
-        android:usesCleartextTraffic="false"
+        android:usesCleartextTraffic="true"
         android:extractNativeLibs="true"
+        android:name=".CvaApplication"
         xmlns:tools="http://schemas.android.com/tools">
+
+        <!--
+            android:usesCleartextTraffic="true"  ← CHANGED from false to true
+            The Termux bootstrap ZIP is downloaded over HTTPS but some CDN mirrors
+            redirect through HTTP.  Set to true to avoid NetworkSecurityException.
+            You can restrict this further with a network_security_config.xml later.
+
+            android:name=".CvaApplication"       ← ADDED
+            Wires in TermuxApplication.onAppCreate() so bootstrap dirs are created
+            before any Activity or Service touches the filesystem.
+        -->
 
         <!-- ── Splash — launcher entry point ──────────────────────────────── -->
         <activity
@@ -73,18 +88,49 @@
             android:launchMode="singleTop" />
 
         <!-- ── Screen capture permission trampoline ────────────────────────── -->
-        <!--
-            Transparent activity that shows the "Start recording?" dialog.
-            On result it calls startForegroundService(SmartOverlayService)
-            and passes the raw projection token — getMediaProjection() is
-            called inside the service, satisfying the Android 14+ requirement.
-        -->
         <activity
             android:name=".ScreenCapturePermissionActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:exported="false" />
 
+        <!-- ── Task Allocation Activity ─────────────────────────────────────── -->
+        <activity
+            android:name=".TaskAllocationActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait" />
+
+        <!-- ── TmuxDoctor — self-heal terminal environment ───────────────────── -->
+        <activity
+            android:name=".TmuxDoctorActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.AppCompat.DayNight.NoActionBar" />
+
+        <!-- ── Terminal foreground service ───────────────────────────────────── -->
+        <!--
+            foregroundServiceType="specialUse|dataSync":
+              • specialUse  — covers the interactive terminal session (exec of binaries)
+              • dataSync    — covers bootstrap ZIP downloads / package installs
+            Both are needed on API 34+ to avoid ForegroundServiceDidNotStartInTimeException.
+        -->
+        <service
+            android:name=".TerminalService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse|dataSync" />
+
         <!-- ── IME Service ────────────────────────────────────────────────── -->
+        <!--
+            FIX NOTE (KeyboardService NPE): KeyboardService.setupTerminalSection() calls
+            manager.setDoctorCallback() when the view is shown, but TerminalManager may be
+            null if TerminalService hasn't bound yet. In KeyboardService.java add a null
+            guard at line ~560:
+              if (manager != null) manager.setDoctorCallback(doctorCallback);
+            Nothing to fix in the manifest for this crash.
+        -->
         <service
             android:name=".KeyboardService"
             android:label="@string/keyboard_name"
@@ -98,23 +144,41 @@
                 android:resource="@xml/method" />
         </service>
 
-        <!-- ── Basic float overlay (original, kept for compatibility) ──────── -->
+        <!-- ── Basic float overlay ──────────────────────────────────────────── -->
+        <!--
+            FIX: InflateException at overlay_bubble.xml line 65 —
+            "UnsupportedOperationException: Failed to resolve attribute at index 13"
+            Root cause: overlay_bubble.xml uses ?attr/colorPrimary / ?attr/selectableItemBackground
+            (AppCompat theme attributes). When LayoutInflater runs inside a Service, it uses the
+            ApplicationContext which defaults to Theme.DeviceDefault.Light.DarkActionBar — that theme
+            has NO attr/colorPrimary, causing the crash.
+            Fix: declare the service with an AppCompat theme so the LayoutInflater context has all
+            required attributes. In OverlayService.java also wrap the context:
+              ContextThemeWrapper themed = new ContextThemeWrapper(this, R.style.Theme_AppCompat);
+              LayoutInflater inflater = LayoutInflater.from(themed);
+        -->
         <service
             android:name=".OverlayService"
             android:exported="false"
+            android:theme="@style/Theme.AppCompat"
             android:foregroundServiceType="specialUse" />
 
         <!-- ── Smart AI overlay (screen capture + gesture automation) ──────── -->
         <!--
-            foregroundServiceType="mediaProjection" is REQUIRED on Android 14+.
-            Without it, getMediaProjection() throws SecurityException.
+            FIX (MediaProjection crash 1): foregroundServiceType="mediaProjection" is declared
+            here, but the service must call startForeground(id, notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) BEFORE getMediaProjection()
+            is called on the token. See MediaProjectionGate.java for the correct sequence.
+
+            FIX (theme): same AppCompat theme for any overlay inflation in this service.
         -->
         <service
             android:name=".SmartOverlayService"
             android:exported="false"
+            android:theme="@style/Theme.AppCompat"
             android:foregroundServiceType="mediaProjection" />
 
-        <!-- ── Accessibility Service (tap/swipe/type injection) ───────────── -->
+        <!-- ── Accessibility Service ──────────────────────────────────────── -->
         <service
             android:name=".CVAAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -126,6 +190,17 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- Android 14+ (API 34): foregroundServiceType="specialUse" requires this
+             property to explain why specialUse is needed. Without it the app will be
+             rejected from the Play Store and may show a warning on device. -->
+        <property
+            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+            android:value="CVA runs an interactive Linux terminal (bash/busybox) and
+                           bootstrap package installer as a foreground process. This
+                           requires specialUse because no other foreground service type
+                           (dataSync, mediaPlayback, etc.) covers long-running shell
+                           process execution." />
 
     </application>
 
